@@ -94,46 +94,45 @@ def query_claude_with_data(question, matters_data, matters_index, matters_vector
     st.write("### Related Matters of Recommended Lawyer(s):")
     st.write(secondary_info[secondary_info['Attorney'].isin(recommended_lawyers)].to_html(index=False), unsafe_allow_html=True)
 
-def main():
-    st.title("Rolodex AI: Find Your Ideal Lawyer 👨‍⚖️ Utilizing Claude 2.1")
-    st.write("Ask questions about the top lawyers for specific legal needs:")
+# Streamlit app layout
+st.title("Rolodex AI: Find Your Ideal Lawyer 👨‍⚖️ Utilizing Claude 2.1")
+st.write("Ask questions about the top lawyers for specific legal needs:")
 
-    default_questions = {
-        "Who are the top lawyers for corporate law?": "corporate law",
-        "Which attorneys have the most experience with intellectual property?": "intellectual property",
-        "Can you recommend a lawyer specializing in employment law?": "employment law",
-        "Who are the best litigators for financial cases?": "financial law",
-        "Which lawyer should I contact for real estate matters?": "real estate"
-    }
+default_questions = {
+    "Who are the top lawyers for corporate law?": "corporate law",
+    "Which attorneys have the most experience with intellectual property?": "intellectual property",
+    "Can you recommend a lawyer specializing in employment law?": "employment law",
+    "Who are the best litigators for financial cases?": "financial law",
+    "Which lawyer should I contact for real estate matters?": "real estate"
+}
 
-    user_input = st.text_input("Type your question:", placeholder="e.g., 'Who are the top lawyers for corporate law?'")
-    
-    for question, _ in default_questions.items():
-        if st.button(question):
-            user_input = question
-            break
+user_input = st.text_input("Type your question:", placeholder="e.g., 'Who are the top lawyers for corporate law?'")
 
-    if user_input:
-        matters_data = load_and_clean_data('Cleaned_Matters_Data.csv', encoding='latin1')
-        if not matters_data.empty:
-            matters_index, matters_vectorizer = create_weighted_vector_db(matters_data)
-            query_claude_with_data(user_input, matters_data, matters_index, matters_vectorizer)
-        else:
-            st.error("Failed to load data.")
+for question, _ in default_questions.items():
+    if st.button(question):
+        user_input = question
+        break
 
-    # Feedback section
-    st.write("### How accurate was this result?")
-    accuracy_choice = st.radio("Please select one:", ["Accurate", "Not Accurate", "Type your own feedback"])
-    
-    if accuracy_choice == "Type your own feedback":
-        custom_feedback = st.text_input("Please provide your feedback:")
+if user_input:
+    matters_data = load_and_clean_data('Cleaned_Matters_Data.csv', encoding='latin1')
+    if not matters_data.empty:
+        matters_index, matters_vectorizer = create_weighted_vector_db(matters_data)
+        query_claude_with_data(user_input, matters_data, matters_index, matters_vectorizer)
     else:
-        custom_feedback = accuracy_choice
+        st.error("Failed to load data.")
 
-    if st.button("Submit Feedback"):
-        if custom_feedback:
-            st.write(f"Thank you for your feedback: '{custom_feedback}'")
-        else:
-            st.error("Please provide feedback before submitting.")
+# Feedback section
+st.write("### How accurate was this result?")
+accuracy_choice = st.radio("Please select one:", ["Accurate", "Not Accurate", "Type your own feedback"])
 
+if accuracy_choice == "Type your own feedback":
+    custom_feedback = st.text_input("Please provide your feedback:")
+else:
+    custom_feedback = accuracy_choice
+
+if st.button("Submit Feedback"):
+    if custom_feedback:
+        st.write(f"Thank you for your feedback: '{custom_feedback}'")
+    else:
+        st.error("Please provide feedback before submitting.")
 
