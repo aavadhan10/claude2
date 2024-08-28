@@ -6,7 +6,6 @@ from sklearn.preprocessing import normalize
 import time
 from anthropic import Anthropic, HUMAN_PROMPT, AI_PROMPT
 
-# Add this block at the beginning of your script, right after the imports
 # Correctly access the API key from Streamlit secrets
 claude_api_key = st.secrets["claude"]["CLAUDE_API_KEY"]
 
@@ -15,12 +14,6 @@ if not claude_api_key:
     st.stop()
 
 client = Anthropic(api_key=claude_api_key)
-
-
-# Initialize Claude API using environment variable
-claude_api_key = st.secrets["claude"]["CLAUDE_API_KEY"]
-client = Anthropic(api_key=claude_api_key)
-
 
 # Load and clean CSV data with specified encoding
 @st.cache_data
