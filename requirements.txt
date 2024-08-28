@@ -1,5 +1,6 @@
 streamlit==1.24.0
 pandas==1.5.3
-faiss-cpu==1.7.3  # Use 'faiss-gpu' if you're using a GPU
-scikit-learn==1.2.2  # Provides the TfidfVectorizer and other utilities
-anthropic==0.3.0  # Use the latest version of the Anthropic SDK that supports Claude 3.5 Sonnet
+faiss-cpu==1.7.3
+scikit-learn==1.2.2
+anthropic==0.5.0
+pydantic==1.10.7
