@@ -44,12 +44,17 @@ def call_claude(messages):
         
         prompt = f"{system_message}\n\nHuman: {user_message}\n\nAssistant:"
         
-        response = client.create_completion(  # Adjusted to the correct method
+        response = client.create_completion(
             prompt=prompt,
             model="claude-3.5-sonnet",
             max_tokens_to_sample=150,
             temperature=0.9,
         )
+        st.write("Received response from Claude 3.5 Sonnet")
+        return response['completion'].strip()
+    except Exception as e:
+        st.error(f"An unexpected error occurred: {e}")
+        return None
         st.write("Received response from Claude 3.5 Sonnet")
         return response['completion'].strip()  # Ensure this accesses the correct field in the response
     except anthropic.APIConnectionError as e:
