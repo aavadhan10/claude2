@@ -53,9 +53,6 @@ def call_claude(messages):
         )
         st.write("Received response from Claude 3.5 Sonnet")
         return response['completion'].strip()
-    except anthropic.APIError as e:
-        st.error(f"An API error occurred: {e}")
-        return None
     except Exception as e:
         st.error(f"An unexpected error occurred: {e}")
         return None
