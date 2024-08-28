@@ -1,14 +1,14 @@
 import streamlit as st
-import anthropic
 import pandas as pd
 import faiss
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import normalize
 import time
+from anthropic import Anthropic, HUMAN_PROMPT, AI_PROMPT
 
 # Initialize Claude API using environment variable
 claude_api_key = st.secrets["claude"]["CLAUDE_API_KEY"]
-client = anthropic.Anthropic(api_key=claude_api_key)
+client = Anthropic(api_key=claude_api_key)
 
 # Load and clean CSV data with specified encoding
 @st.cache_data
@@ -42,19 +42,19 @@ def call_claude(messages):
         system_message = messages[0]['content'] if messages[0]['role'] == 'system' else ""
         user_message = next(msg['content'] for msg in messages if msg['role'] == 'user')
 
+        # Construct the full prompt
+        prompt = f"{system_message}\n\n{HUMAN_PROMPT} {user_message}{AI_PROMPT}"
+
         # Call the Claude model using the new API structure
-        response = client.messages.create(
+        response = client.completions.create(
             model="claude-3.5-sonnet",
-            max_tokens=150,
+            max_tokens_to_sample=150,
             temperature=0.9,
-            messages=[
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": user_message}
-            ]
+            prompt=prompt
         )
 
         st.write("Received response from Claude 3.5 Sonnet")
-        return response.content[0].text
+        return response.completion
 
     except Exception as e:
         st.error(f"An unexpected error occurred: {e}")
