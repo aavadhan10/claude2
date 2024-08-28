@@ -38,21 +38,20 @@ def call_claude(messages):
     try:
         st.write("Calling Claude 3.5 Sonnet...")
 
-        # Define prompt tokens
-        HUMAN_PROMPT = anthropic.HUMAN_PROMPT
-        ASSISTANT_PROMPT = anthropic.ASSISTANT_PROMPT
+        # Manually define the prompt tokens
+        HUMAN_PROMPT = "\n\nHuman:"
+        ASSISTANT_PROMPT = "\n\nAssistant:"
 
         # Construct the prompt in the required format
         system_message = messages[0]['content'] if messages[0]['role'] == 'system' else ""
         user_message = next(msg['content'] for msg in messages if msg['role'] == 'user')
 
-        # Start the prompt with the required HUMAN_PROMPT token
-        prompt = f"{system_message}{HUMAN_PROMPT} {user_message}{ASSISTANT_PROMPT}"
+        prompt = f"{HUMAN_PROMPT} {user_message}{ASSISTANT_PROMPT}"
 
         # Use the correct method for generating a completion
-        response = client.completion(
-            prompt=prompt,
+        response = client.completions.create(
             model="claude-3.5-sonnet",
+            prompt=prompt,
             max_tokens_to_sample=150,
             temperature=0.9,
         )
