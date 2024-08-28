@@ -25,7 +25,7 @@ def load_and_clean_data(file_path, encoding='utf-8'):
     except UnicodeDecodeError:
         # If UTF-8 fails, try latin-1
         data = pd.read_csv(file_path, encoding='latin-1')
-    
+
     def clean_text(text):
         if isinstance(text, str):
             # Remove non-printable characters
@@ -39,17 +39,17 @@ def load_and_clean_data(file_path, encoding='utf-8'):
             # Replace multiple spaces with a single space
             text = re.sub(r'\s+', ' ', text).strip()
         return text
-    
+
     # Clean column names
     data.columns = data.columns.str.replace('ï»¿', '').str.replace('Ã', '').str.strip()
-    
+
     # Clean text in all columns
     for col in data.columns:
         data[col] = data[col].apply(clean_text)
-    
+
     # Remove unnamed columns
     data = data.loc[:, ~data.columns.str.contains('^Unnamed')]
-    
+
     return data
 
 @st.cache_resource
@@ -62,15 +62,15 @@ def create_weighted_vector_db(data):
         'Area of Expertise': 1.5,
         'Matter Description': 1.0
     }
-    
+
     def weighted_text(row):
         return ' '.join([
             ' '.join([str(row[col])] * int(weight * 10))
             for col, weight in weights.items() if col in row.index
         ])
-    
+
     combined_text = data.apply(weighted_text, axis=1)
-    
+
     vectorizer = TfidfVectorizer(stop_words='english', max_features=5000)
     X = vectorizer.fit_transform(combined_text)
     X = normalize(X)
@@ -83,7 +83,7 @@ def call_claude(messages):
         system_message = messages[0]['content'] if messages[0]['role'] == 'system' else ""
         user_message = next(msg['content'] for msg in messages if msg['role'] == 'user')
         prompt = f"{system_message}\n\n{HUMAN_PROMPT} {user_message}{AI_PROMPT}"
-        
+
         response = client.completions.create(
             model="claude-2.1",
             max_tokens_to_sample=500,
@@ -97,34 +97,40 @@ def call_claude(messages):
 
 def query_claude_with_data(question, matters_data, matters_index, matters_vectorizer):
     question_vec = matters_vectorizer.transform([question])
-    D, I = matters_index.search(normalize(question_vec).toarray(), k=5)
-    
+    D, I = matters_index.search(normalize(question_vec).toarray(), k=10)  # Increased k to 10
+
     relevant_data = matters_data.iloc[I[0]]
-    
-    primary_info = relevant_data[['Attorney', 'Work Email', 'Role Detail', 'Practice Group', 'Summary', 'Area of Expertise']].drop_duplicates(subset=['Attorney'])
-    secondary_info = relevant_data[['Attorney', 'Matter Description']].drop_duplicates(subset=['Attorney'])
-    
+
+    # Calculate relevance scores
+    relevance_scores = 1 / (1 + D[0])
+    relevant_data['relevance_score'] = relevance_scores
+
+    # Sort by relevance score and get top 3
+    top_relevant_data = relevant_data.sort_values('relevance_score', ascending=False).head(3)
+
+    primary_info = top_relevant_data[['Attorney', 'Work Email', 'Role Detail', 'Practice Group', 'Summary', 'Area of Expertise']].drop_duplicates(subset=['Attorney'])
+    secondary_info = top_relevant_data[['Attorney', 'Matter Description', 'relevance_score']].drop_duplicates(subset=['Attorney'])
+
     primary_context = primary_info.to_string(index=False)
     secondary_context = secondary_info.to_string(index=False)
-    
+
     messages = [
-        {"role": "system", "content": "You are an expert legal consultant tasked with recommending the best lawyer based on the given information. You must always recommend at least one specific lawyer, even if the match isn't perfect. First, analyze the primary information about the lawyers. Then, consider the secondary information about their matters to refine your recommendation."},
-        {"role": "user", "content": f"Question: {question}\n\nPrimary Lawyer Information:\n{primary_context}\n\nBased on this primary information, who are the top candidates and why?\n\nNow, consider this additional information about their matters:\n{secondary_context}\n\nGiven all this information, provide your final recommendation for the most suitable lawyer(s) and explain your reasoning in detail. Remember, you must recommend at least one specific lawyer by name, even if they're not a perfect match for the query."}
+        {"role": "system", "content": "You are an expert legal consultant tasked with recommending the best lawyers based on the given information. Analyze the primary information about the lawyers and consider the secondary information about their matters to refine your recommendation. Pay attention to the relevance scores provided."},
+        {"role": "user", "content": f"Question: {question}\n\nTop 3 Lawyers Information:\n{primary_context}\n\nSecondary Information (including relevance scores):\n{secondary_context}\n\nBased on all this information, provide your final recommendation for the most suitable lawyer(s) and explain your reasoning in detail. Consider the relevance scores when making your recommendation. Recommend up to 3 lawyers, but only if they are relevant to the query. If fewer than 3 lawyers are relevant, only recommend those who are truly suitable."}
     ]
-    
+
     claude_response = call_claude(messages)
     if not claude_response:
         return
-    
+
     st.write("### Claude's Recommendation:")
     st.write(claude_response)
-    
-    st.write("### Recommended Lawyer(s) Information:")
-    recommended_lawyers = primary_info['Attorney'].tolist()
-    st.write(primary_info[primary_info['Attorney'].isin(recommended_lawyers)].to_html(index=False), unsafe_allow_html=True)
-    
+
+    st.write("### Top Recommended Lawyer(s) Information:")
+    st.write(primary_info.to_html(index=False), unsafe_allow_html=True)
+
     st.write("### Related Matters of Recommended Lawyer(s):")
-    st.write(secondary_info[secondary_info['Attorney'].isin(recommended_lawyers)].to_html(index=False), unsafe_allow_html=True)
+    st.write(secondary_info.to_html(index=False), unsafe_allow_html=True)
 
 # Streamlit app layout
 st.title("Rolodex AI: Find Your Ideal Lawyer 👨‍⚖️ Utilizing Claude 2.1")
