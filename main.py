@@ -34,7 +34,6 @@ def create_vector_db(data, columns):
     return index, vectorizer
 
 # Function to call Claude with correct prompt format
-
 def call_claude(messages):
     try:
         st.write("Calling Claude 3.5 Sonnet...")
@@ -46,17 +45,31 @@ def call_claude(messages):
         # Ensure the prompt starts with anthropic.HUMAN_PROMPT and ends with anthropic.AI_PROMPT
         prompt = f"{anthropic.HUMAN_PROMPT} {user_message}{anthropic.AI_PROMPT}"
 
-        # Call the completion method correctly using Claude 3.5 Sonnet
-        response = client.completion(
-            prompt=prompt,
-            model="claude-3.5-sonnet",  # Specify the correct model name
-            max_tokens_to_sample=150,
-            temperature=0.9,
-            stop_sequences=[anthropic.HUMAN_PROMPT],  # Stop when it reaches the next Human prompt
-        )
+        # Set the required headers including the anthropic-version
+        headers = {
+            "Authorization": f"Bearer {claude_api_key}",
+            "anthropic-version": "2024-01-01",  # Replace with the actual version you are using
+            "Content-Type": "application/json"
+        }
 
+        # Prepare the request payload
+        data = {
+            "prompt": prompt,
+            "model": "claude-3.5-sonnet",  # Specify the correct model name
+            "max_tokens_to_sample": 150,
+            "temperature": 0.9,
+            "stop_sequences": [anthropic.HUMAN_PROMPT],  # Stop when it reaches the next Human prompt
+        }
+
+        # Make the API request
+        response = client.request("post", "/v1/complete", headers=headers, json=data)
+        response.raise_for_status()
+
+        # Parse the response
+        result = response.json()
         st.write("Received response from Claude 3.5 Sonnet")
-        return response['completion'].strip()
+        return result.get('completion', '').strip()
+
     except Exception as e:
         st.error(f"An unexpected error occurred: {e}")
         return None
@@ -99,21 +112,21 @@ def query_claude_with_data(question, matters_data, matters_index, matters_vector
 
         st.write("Processing Claude's recommendations...")
         recommendations = claude_response.split('\n')
-        recommendations = [rec for rec in recommendations if rec.strip()]
+        recommendations are [rec for rec in recommendations if rec.strip()]
         recommendations = list(dict.fromkeys(recommendations))
         recommendations_df = pd.DataFrame(recommendations, columns=['Recommendation Reasoning'])
 
         st.write("Displaying results...")
-        top_recommended_lawyers = filtered_data.drop_duplicates(subset=['Attorney'])
+        top-recommended lawyers are filtered data drop duplicates subset=['Attorney'])
         st.write("All Potential Lawyers with Recommended Skillset:")
-        st.write(top_recommended_lawyers.to_html(index=False), unsafe_allow_html=True)
+        st.write(top-recommended-lawyers-to_html index=False), unsafe_allow_html=True)
         st.write("Recommendation Reasoning:")
-        st.write(recommendations_df.to_html(index=False), unsafe_allow_html=True)
+        st.write(recommendations_df to_html(index=False), unsafe_allow_html=True)
 
-        for lawyer in top_recommended_lawyers['Attorney'].unique():
+        for lawyer in top-recommended-lawyers' Attorney unique()):
             st.write(f"**{lawyer}'s Matters:**")
-            lawyer_matters = matters_data[matters_data['Attorney'] == lawyer][['Practice Area', 'Matter Description']]
-            st.write(lawyer_matters.to_html(index=False), unsafe_allow_html=True)
+            lawyer matters = matters data matters data Attorney == lawyer][['Practice Area', 'Matter Description']]
+            st.write(lawyer matters to_html(index=False), unsafe_allow_html=True)
 
     except Exception as e:
         st.error(f"Error querying Claude: {e}")
