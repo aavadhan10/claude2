@@ -4,7 +4,7 @@ import numpy as np
 import faiss
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import normalize
-from anthropic import Anthropic
+from anthropic import Anthropic, HUMAN_PROMPT, AI_PROMPT
 import re
 import unicodedata
 
@@ -83,20 +83,23 @@ def create_weighted_vector_db(data):
 
 def call_claude(messages):
     try:
-        st.write("Calling Claude 3 Sonnet...")
+        st.write("Calling Claude...")
         
-        response = client.messages.create(
-            model="claude-3-sonnet-20240229",
-            max_tokens=1000,
+        system_message = messages[0]['content']
+        user_message = messages[1]['content']
+        
+        prompt = f"{system_message}\n\n{HUMAN_PROMPT} {user_message}{AI_PROMPT}"
+        
+        response = client.completions.create(
+            model="claude-2.1",
+            prompt=prompt,
+            max_tokens_to_sample=1000,
             temperature=0.7,
-            messages=[
-                {"role": "system", "content": messages[0]['content']},
-                {"role": "user", "content": messages[1]['content']}
-            ]
+            stop_sequences=[HUMAN_PROMPT]
         )
         
-        st.write("Received response from Claude 3 Sonnet")
-        return response.content[0].text
+        st.write("Received response from Claude")
+        return response.completion
     except Exception as e:
         st.error(f"Error calling Claude: {e}")
         return None
@@ -133,7 +136,7 @@ def query_claude_with_data(question, matters_data, matters_index, matters_vector
     st.write(secondary_info[secondary_info['Attorney'].isin(recommended_lawyers)].to_html(index=False), unsafe_allow_html=True)
 
 # Streamlit app layout
-st.title("Rolodex AI: Find Your Ideal Lawyer 👨‍⚖️ Utilizing Claude 3 Sonnet")
+st.title("Rolodex AI: Find Your Ideal Lawyer 👨‍⚖️ Utilizing Claude")
 st.write("Ask questions about the top lawyers for specific legal needs:")
 
 default_questions = {
