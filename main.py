@@ -45,17 +45,17 @@ def call_claude(messages):
         # Ensure the prompt starts with anthropic.HUMAN_PROMPT and ends with anthropic.AI_PROMPT
         prompt = f"{anthropic.HUMAN_PROMPT} {user_message}{anthropic.AI_PROMPT}"
 
-        # Call the Claude model using the correct method
-        response = client.completions.create(
-            model="claude-3.5-sonnet",  # Specify the correct model name
+        # Call the Claude model directly
+        response = client.completion(
             prompt=prompt,
+            model="claude-3.5-sonnet",  # Specify the correct model name
             max_tokens_to_sample=150,
             temperature=0.9,
             stop_sequences=[anthropic.HUMAN_PROMPT]  # Stop when it reaches the next Human prompt
         )
 
         st.write("Received response from Claude 3.5 Sonnet")
-        return response.completion.strip()
+        return response['completion'].strip()
 
     except Exception as e:
         st.error(f"An unexpected error occurred: {e}")
