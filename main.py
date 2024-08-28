@@ -52,7 +52,7 @@ def call_claude(messages):
 
         # Call the Claude model using the new API structure
         response = client.completions.create(
-            model="claude-3.5-sonnet-20240229",
+            model="claude-3-sonnet-20240229",
             max_tokens_to_sample=150,
             temperature=0.9,
             prompt=prompt
