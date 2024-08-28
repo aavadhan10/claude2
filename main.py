@@ -43,19 +43,19 @@ def call_claude(messages):
         system_message = messages[0]['content'] if messages[0]['role'] == 'system' else ""
         user_message = next(msg['content'] for msg in messages if msg['role'] == 'user')
 
-        # Ensure the prompt starts with anthropic.HUMAN_PROMPT
-        prompt = f"{system_message}{anthropic.HUMAN_PROMPT} {user_message}{anthropic.AI_PROMPT}"
+        # Ensure the prompt starts with anthropic.HUMAN_PROMPT and ends with anthropic.AI_PROMPT
+        prompt = f"{anthropic.HUMAN_PROMPT} {user_message}{anthropic.AI_PROMPT}"
 
-        # Call the completion method correctly
+        # Call the completion method correctly using Claude 3.5 Sonnet
         response = client.completion(
             prompt=prompt,
-            model="claude-3.5 Sonnet",  # Ensure this matches the correct model version
+            model="claude-3.5-sonnet",  # Specify the correct model name
             max_tokens_to_sample=150,
             temperature=0.9,
-            stop_sequences=[anthropic.HUMAN_PROMPT],  # Adjust stop sequences as necessary
+            stop_sequences=[anthropic.HUMAN_PROMPT],  # Stop when it reaches the next Human prompt
         )
 
-        st.write("Received response from Claude")
+        st.write("Received response from Claude 3.5 Sonnet")
         return response['completion'].strip()
     except Exception as e:
         st.error(f"An unexpected error occurred: {e}")
@@ -65,6 +65,8 @@ def call_claude(messages):
 def query_claude_with_data(question, matters_data, matters_index, matters_vectorizer):
     try:
         st.write("Processing query...")
+
+        # Vectorize the last three words of the question
         question = ' '.join(question.split()[-3:])  # Consider the last three words in the query
         question_vec = matters_vectorizer.transform([question])
 
@@ -82,6 +84,7 @@ def query_claude_with_data(question, matters_data, matters_index, matters_vector
         if filtered_data.empty:
             filtered_data = matters_data[['Attorney', 'Practice Area', 'Matter Description', 'Work Email', 'Role Detail']].rename(columns={'Role Detail': 'Role'}).dropna(subset=['Attorney']).drop_duplicates(subset=['Attorney']).head(1)
 
+        # Prepare the context for the prompt
         context = filtered_data.to_string(index=False)
         messages = [
             {"role": "system", "content": "You are the CEO of a prestigious law firm."},
