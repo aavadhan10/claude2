@@ -57,7 +57,7 @@ def call_claude(messages):
 
         response = client.completions.create(
             model="claude-2.1",
-            max_tokens_to_sample=2000,  # Increased for more detailed responses
+            max_tokens_to_sample=2000,
             temperature=0.7,
             prompt=prompt
         )
@@ -73,15 +73,17 @@ def query_claude_with_data(question, matters_data, matters_index, matters_vector
 
         relevant_data = matters_data.iloc[I[0]]
 
-        primary_info = relevant_data[['Attorney', 'Role Detail', 'Practice Group', 'Summary', 'Area of Expertise']].drop_duplicates(subset=['Attorney'])
-        secondary_info = relevant_data[['Attorney', 'Matter Description']].drop_duplicates(subset=['Attorney'])
-
-        # Combine primary and secondary info for each lawyer
+        # Combine all relevant information for each lawyer
         combined_info = []
-        for _, lawyer in primary_info.iterrows():
-            lawyer_matters = secondary_info[secondary_info['Attorney'] == lawyer['Attorney']]['Matter Description'].tolist()
-            combined_info.append(f"Lawyer: {lawyer['Attorney']}\nRole: {lawyer['Role Detail']}\nPractice Group: {lawyer['Practice Group']}\nSummary: {lawyer['Summary']}\nArea of Expertise: {lawyer['Area of Expertise']}\nMatter Descriptions: {'; '.join(lawyer_matters[:3])}\n\n")
-        
+        for _, lawyer in relevant_data.iterrows():
+            lawyer_info = f"Lawyer: {lawyer['Attorney']}\n"
+            lawyer_info += f"Role: {lawyer['Role Detail']}\n"
+            lawyer_info += f"Practice Group: {lawyer['Practice Group']}\n"
+            lawyer_info += f"Summary: {lawyer['Summary']}\n"
+            lawyer_info += f"Area of Expertise: {lawyer['Area of Expertise']}\n"
+            lawyer_info += f"Matter Description: {lawyer['Matter Description']}\n\n"
+            combined_info.append(lawyer_info)
+
         combined_context = "\n".join(combined_info)
 
         messages = [
@@ -98,10 +100,10 @@ def query_claude_with_data(question, matters_data, matters_index, matters_vector
         st.write(claude_response)
 
         st.write("### All Relevant Lawyers' Information:")
-        st.write(primary_info.to_html(index=False), unsafe_allow_html=True)
+        st.write(relevant_data[['Attorney', 'Role Detail', 'Practice Group', 'Summary', 'Area of Expertise']].drop_duplicates(subset=['Attorney']).to_html(index=False), unsafe_allow_html=True)
 
         st.write("### Related Matters of Relevant Lawyers:")
-        st.write(secondary_info.to_html(index=False), unsafe_allow_html=True)
+        st.write(relevant_data[['Attorney', 'Matter Description']].drop_duplicates(subset=['Attorney', 'Matter Description']).to_html(index=False), unsafe_allow_html=True)
 
     except Exception as e:
         st.error(f"An error occurred while processing the query: {str(e)}")
@@ -150,5 +152,3 @@ else:
 if st.button("Submit Feedback"):
     if custom_feedback:
         st.write(f"Thank you for your feedback: '{custom_feedback}'")
-    else:
-        st.error("Please provide feedback before submitting.")
