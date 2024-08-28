@@ -44,13 +44,15 @@ def call_claude(messages):
 
         prompt = f"{system_message}\n\nHuman: {user_message}\n\nAssistant:"
 
-        response = client.complete(
+        # Attempt to call the completion API
+        response = client.completions.create(  # Assuming this is the correct method
             prompt=prompt,
             model="claude-3.5",
             max_tokens_to_sample=150,
             temperature=0.9,
             stop_sequences=["\n\nHuman:"],  # Adjust stop sequences as necessary
         )
+
         st.write("Received response from Claude 3.5 Sonnet")
         return response['completion'].strip()
     except Exception as e:
