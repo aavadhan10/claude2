@@ -44,12 +44,18 @@ def call_claude(messages):
         
         prompt = f"{system_message}\n\nHuman: {user_message}\n\nAssistant:"
         
-        response = client.create_completion(
-            prompt=prompt,
+        # Use the correct method for generating a completion
+        response = client.completions.create(
             model="claude-3.5-sonnet",
+            prompt=prompt,
             max_tokens_to_sample=150,
             temperature=0.9,
         )
+        st.write("Received response from Claude 3.5 Sonnet")
+        return response['completion'].strip()
+    except Exception as e:
+        st.error(f"An unexpected error occurred: {e}")
+        return None
         st.write("Received response from Claude 3.5 Sonnet")
         return response['completion'].strip()
     except Exception as e:
