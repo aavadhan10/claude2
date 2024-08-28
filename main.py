@@ -37,20 +37,31 @@ def create_vector_db(data, columns):
 def call_claude(messages):
     try:
         st.write("Calling Claude 3.5 Sonnet...")
-        
+
         # Construct the prompt in the required format
         system_message = messages[0]['content'] if messages[0]['role'] == 'system' else ""
         user_message = next(msg['content'] for msg in messages if msg['role'] == 'user')
-        
+
         prompt = f"{system_message}\n\nHuman: {user_message}\n\nAssistant:"
-        
+
         # Use the correct method for generating a completion
-        response = client.completions.create(
-            model="claude-3.5-sonnet",
+        response = client.completion(
             prompt=prompt,
+            model="claude-3.5-sonnet",
             max_tokens_to_sample=150,
             temperature=0.9,
         )
+        st.write("Received response from Claude 3.5 Sonnet")
+        return response['completion'].strip()
+
+    except Exception as e:
+        st.error(f"An unexpected error occurred: {e}")
+        return None
+        st.write("Received response from Claude 3.5 Sonnet")
+        return response['completion'].strip()
+    except Exception as e:
+        st.error(f"An unexpected error occurred: {e}")
+        return None
         st.write("Received response from Claude 3.5 Sonnet")
         return response['completion'].strip()
     except Exception as e:
