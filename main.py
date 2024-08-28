@@ -34,6 +34,7 @@ def create_vector_db(data, columns):
     return index, vectorizer
 
 # Function to call Claude with correct prompt format
+
 def call_claude(messages):
     try:
         st.write("Calling Claude 3.5 Sonnet...")
@@ -56,8 +57,13 @@ def call_claude(messages):
             max_tokens_to_sample=150,
             temperature=0.9,
         )
+
         st.write("Received response from Claude 3.5 Sonnet")
         return response['completion'].strip()
+
+    except Exception as e:
+        st.error(f"An unexpected error occurred: {e}")
+        return None
 
     except Exception as e:
         st.error(f"An unexpected error occurred: {e}")
