@@ -44,17 +44,20 @@ def call_claude(messages):
 
         prompt = f"{system_message}\n\nHuman: {user_message}\n\nAssistant:"
 
-        # Attempt to call the completion API
-        response = client.completions.create(  # Assuming this is the correct method
+        # Correct API call based on the official documentation
+        response = client.completion(
             prompt=prompt,
-            model="claude-3.5",
+            model="claude-3.5 Sonnet",  # Replace with the actual model version you intend to use
             max_tokens_to_sample=150,
             temperature=0.9,
             stop_sequences=["\n\nHuman:"],  # Adjust stop sequences as necessary
         )
 
-        st.write("Received response from Claude 3.5 Sonnet")
+        st.write("Received response from Claude")
         return response['completion'].strip()
+    except anthropic.AnthropicAPIError as e:
+        st.error(f"An API error occurred: {e}")
+        return None
     except Exception as e:
         st.error(f"An unexpected error occurred: {e}")
         return None
@@ -86,7 +89,7 @@ def query_claude_with_data(question, matters_data, matters_index, matters_vector
             {"role": "user", "content": f"Based on the following information, please make a recommendation:\n\n{context}\n\nRecommendation:"}
         ]
 
-        st.write("Calling Claude 3.5 Sonnet for recommendation...")
+        st.write("Calling Claude for recommendation...")
         claude_response = call_claude(messages)
 
         if not claude_response:
