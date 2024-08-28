@@ -97,7 +97,7 @@ def call_claude(messages):
 
 def query_claude_with_data(question, matters_data, matters_index, matters_vectorizer):
     question_vec = matters_vectorizer.transform([question])
-    D, I = matters_index.search(normalize(question_vec).toarray(), k=5)
+    D, I = matters_index.search(normalize(question_vec).toarray(), k=10)  # Increased to top 10 matches
     
     relevant_data = matters_data.iloc[I[0]]
     
@@ -108,8 +108,8 @@ def query_claude_with_data(question, matters_data, matters_index, matters_vector
     secondary_context = secondary_info.to_string(index=False)
     
     messages = [
-        {"role": "system", "content": "You are an expert legal consultant tasked with recommending the best lawyer based on the given information. You must always recommend at least one specific lawyer, even if the match isn't perfect. First, analyze the primary information about the lawyers. Then, consider the secondary information about their matters to refine your recommendation."},
-        {"role": "user", "content": f"Question: {question}\n\nPrimary Lawyer Information:\n{primary_context}\n\nBased on this primary information, who are the top candidates and why?\n\nNow, consider this additional information about their matters:\n{secondary_context}\n\nGiven all this information, provide your final recommendation for the most suitable lawyer(s) and explain your reasoning in detail. Remember, you must recommend at least one specific lawyer by name, even if they're not a perfect match for the query."}
+        {"role": "system", "content": "You are an expert legal consultant tasked with recommending the best lawyer(s) based on the given information. Analyze the primary information about multiple lawyers, then consider their matter descriptions to refine your recommendations. Always recommend at least one specific lawyer, even if not a perfect match."},
+        {"role": "user", "content": f"Question: {question}\n\nPrimary Lawyer Information:\n{primary_context}\n\nBased on this primary information, who are the top candidates and why?\n\nAdditional Matter Descriptions:\n{secondary_context}\n\nConsider all this information and provide your final recommendations for the most suitable lawyer(s), explaining your reasoning in detail. Rank your recommendations if possible."}
     ]
     
     claude_response = call_claude(messages)
@@ -119,12 +119,11 @@ def query_claude_with_data(question, matters_data, matters_index, matters_vector
     st.write("### Claude's Recommendation:")
     st.write(claude_response)
     
-    st.write("### Recommended Lawyer(s) Information:")
-    recommended_lawyers = primary_info['Attorney'].tolist()
-    st.write(primary_info[primary_info['Attorney'].isin(recommended_lawyers)].to_html(index=False), unsafe_allow_html=True)
+    st.write("### All Relevant Lawyers' Information:")
+    st.write(primary_info.to_html(index=False), unsafe_allow_html=True)
     
-    st.write("### Related Matters of Recommended Lawyer(s):")
-    st.write(secondary_info[secondary_info['Attorney'].isin(recommended_lawyers)].to_html(index=False), unsafe_allow_html=True)
+    st.write("### Related Matters of Relevant Lawyers:")
+    st.write(secondary_info.to_html(index=False), unsafe_allow_html=True)
 
 # Streamlit app layout
 st.title("Rolodex AI: Find Your Ideal Lawyer 👨‍⚖️ Utilizing Claude 2.1")
