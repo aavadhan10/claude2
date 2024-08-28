@@ -5,6 +5,8 @@ import faiss
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import normalize
 from anthropic import Anthropic, HUMAN_PROMPT, AI_PROMPT
+import re
+import unicodedata
 
 @st.cache_resource
 def init_anthropic_client():
@@ -17,10 +19,37 @@ def init_anthropic_client():
 client = init_anthropic_client()
 
 @st.cache_data
-def load_and_clean_data(file_path, encoding='latin1'):
-    data = pd.read_csv(file_path, encoding=encoding)
+def load_and_clean_data(file_path, encoding='utf-8'):
+    try:
+        data = pd.read_csv(file_path, encoding=encoding)
+    except UnicodeDecodeError:
+        # If UTF-8 fails, try latin-1
+        data = pd.read_csv(file_path, encoding='latin-1')
+    
+    def clean_text(text):
+        if isinstance(text, str):
+            # Remove non-printable characters
+            text = ''.join(char for char in text if char.isprintable())
+            # Normalize unicode characters
+            text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('ascii')
+            # Replace specific problematic sequences
+            text = text.replace('Ã¢ÂÂ', "'").replace('Ã¢ÂÂ¨', ", ")
+            # Remove any remaining unicode escape sequences
+            text = re.sub(r'\\u[0-9a-fA-F]{4}', '', text)
+            # Replace multiple spaces with a single space
+            text = re.sub(r'\s+', ' ', text).strip()
+        return text
+    
+    # Clean column names
     data.columns = data.columns.str.replace('ï»¿', '').str.replace('Ã', '').str.strip()
+    
+    # Clean text in all columns
+    for col in data.columns:
+        data[col] = data[col].apply(clean_text)
+    
+    # Remove unnamed columns
     data = data.loc[:, ~data.columns.str.contains('^Unnamed')]
+    
     return data
 
 @st.cache_resource
@@ -72,7 +101,7 @@ def query_claude_with_data(question, matters_data, matters_index, matters_vector
     
     relevant_data = matters_data.iloc[I[0]]
     
-    primary_info = relevant_data[['Attorney', 'Role Detail', 'Practice Group', 'Summary', 'Area of Expertise']].drop_duplicates(subset=['Attorney'])
+    primary_info = relevant_data[['Attorney', 'Work Email', 'Role Detail', 'Practice Group', 'Summary', 'Area of Expertise']].drop_duplicates(subset=['Attorney'])
     secondary_info = relevant_data[['Attorney', 'Matter Description']].drop_duplicates(subset=['Attorney'])
     
     primary_context = primary_info.to_string(index=False)
@@ -98,7 +127,7 @@ def query_claude_with_data(question, matters_data, matters_index, matters_vector
     st.write(secondary_info[secondary_info['Attorney'].isin(recommended_lawyers)].to_html(index=False), unsafe_allow_html=True)
 
 # Streamlit app layout
-st.title("Rolodex AI: Find Your Ideal Lawyer 👨‍⚖️ Utilizing Claude 3.5 Sonnet")
+st.title("Rolodex AI: Find Your Ideal Lawyer 👨‍⚖️ Utilizing Claude 2.1")
 st.write("Ask questions about the top lawyers for specific legal needs:")
 
 default_questions = {
@@ -117,7 +146,7 @@ for question, _ in default_questions.items():
         break
 
 if user_input:
-    matters_data = load_and_clean_data('Cleaned_Matters_Data.csv', encoding='latin1')
+    matters_data = load_and_clean_data('Cleaned_Matters_Data.csv')
     if not matters_data.empty:
         matters_index, matters_vectorizer = create_weighted_vector_db(matters_data)
         query_claude_with_data(user_input, matters_data, matters_index, matters_vectorizer)
@@ -138,4 +167,3 @@ if st.button("Submit Feedback"):
         st.write(f"Thank you for your feedback: '{custom_feedback}'")
     else:
         st.error("Please provide feedback before submitting.")
-
