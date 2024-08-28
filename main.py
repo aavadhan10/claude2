@@ -49,9 +49,9 @@ def call_claude(messages):
         prompt = f"{HUMAN_PROMPT} {user_message}{ASSISTANT_PROMPT}"
 
         # Use the correct method for generating a completion
-        response = client.completions.create(
-            model="claude-3.5-sonnet",
+        response = client.completion(
             prompt=prompt,
+            model="claude-3.5",
             max_tokens_to_sample=150,
             temperature=0.9,
         )
