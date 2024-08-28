@@ -34,10 +34,13 @@ def create_weighted_vector_db(data):
         'Matter Description': 1.0
     }
     
-    combined_text = data.apply(lambda row: ' '.join([
-        f"{weight * ' '.join(str(row[col]).split())}" 
-        for col, weight in weights.items() if col in row
-    ]), axis=1)
+    def weighted_text(row):
+        return ' '.join([
+            ' '.join([str(row[col])] * int(weight * 10))
+            for col, weight in weights.items() if col in row.index
+        ])
+    
+    combined_text = data.apply(weighted_text, axis=1)
     
     vectorizer = TfidfVectorizer(stop_words='english', max_features=5000)
     X = vectorizer.fit_transform(combined_text)
