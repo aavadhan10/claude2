@@ -45,30 +45,17 @@ def call_claude(messages):
         # Ensure the prompt starts with anthropic.HUMAN_PROMPT and ends with anthropic.AI_PROMPT
         prompt = f"{anthropic.HUMAN_PROMPT} {user_message}{anthropic.AI_PROMPT}"
 
-        # Set the required headers including the anthropic-version
-        headers = {
-            "Authorization": f"Bearer {claude_api_key}",
-            "anthropic-version": "2024-01-01",  # Replace with the actual version you are using
-            "Content-Type": "application/json"
-        }
+        # Call the Claude model using the correct method
+        response = client.completions.create(
+            model="claude-3.5-sonnet",  # Specify the correct model name
+            prompt=prompt,
+            max_tokens_to_sample=150,
+            temperature=0.9,
+            stop_sequences=[anthropic.HUMAN_PROMPT]  # Stop when it reaches the next Human prompt
+        )
 
-        # Prepare the request payload
-        data = {
-            "prompt": prompt,
-            "model": "claude-3.5-sonnet",  # Specify the correct model name
-            "max_tokens_to_sample": 150,
-            "temperature": 0.9,
-            "stop_sequences": [anthropic.HUMAN_PROMPT],  # Stop when it reaches the next Human prompt
-        }
-
-        # Make the API request
-        response = client.request("post", "/v1/complete", headers=headers, json=data)
-        response.raise_for_status()
-
-        # Parse the response
-        result = response.json()
         st.write("Received response from Claude 3.5 Sonnet")
-        return result.get('completion', '').strip()
+        return response.completion.strip()
 
     except Exception as e:
         st.error(f"An unexpected error occurred: {e}")
