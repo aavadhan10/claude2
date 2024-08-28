@@ -97,7 +97,7 @@ def call_claude(messages):
 
 def query_claude_with_data(question, matters_data, matters_index, matters_vectorizer):
     question_vec = matters_vectorizer.transform([question])
-    D, I = matters_index.search(normalize(question_vec).toarray(), k=10)  # Increased k to 10
+    D, I = matters_index.search(normalize(question_vec).toarray(), k=30)  # Increased k to 30
 
     relevant_data = matters_data.iloc[I[0]]
 
@@ -105,18 +105,32 @@ def query_claude_with_data(question, matters_data, matters_index, matters_vector
     relevance_scores = 1 / (1 + D[0])
     relevant_data['relevance_score'] = relevance_scores
 
-    # Sort by relevance score and get top 3
-    top_relevant_data = relevant_data.sort_values('relevance_score', ascending=False).head(3)
+    # Sort by relevance score
+    relevant_data = relevant_data.sort_values('relevance_score', ascending=False)
+
+    # Get unique lawyers
+    unique_lawyers = relevant_data['Attorney'].unique()
+
+    # Ensure we have at least 3 unique lawyers (if available)
+    if len(unique_lawyers) < 3:
+        additional_lawyers = matters_data[~matters_data['Attorney'].isin(unique_lawyers)].sample(min(3 - len(unique_lawyers), len(matters_data) - len(unique_lawyers)))
+        relevant_data = pd.concat([relevant_data, additional_lawyers])
+
+    # Get top 3 unique lawyers
+    top_lawyers = relevant_data['Attorney'].unique()[:3]
+
+    # Get all matters for top 3 lawyers, sorted by relevance
+    top_relevant_data = relevant_data[relevant_data['Attorney'].isin(top_lawyers)].sort_values('relevance_score', ascending=False)
 
     primary_info = top_relevant_data[['Attorney', 'Work Email', 'Role Detail', 'Practice Group', 'Summary', 'Area of Expertise']].drop_duplicates(subset=['Attorney'])
-    secondary_info = top_relevant_data[['Attorney', 'Matter Description', 'relevance_score']].drop_duplicates(subset=['Attorney'])
+    secondary_info = top_relevant_data[['Attorney', 'Matter Description', 'relevance_score']]
 
     primary_context = primary_info.to_string(index=False)
     secondary_context = secondary_info.to_string(index=False)
 
     messages = [
         {"role": "system", "content": "You are an expert legal consultant tasked with recommending the best lawyers based on the given information. Analyze the primary information about the lawyers and consider the secondary information about their matters to refine your recommendation. Pay attention to the relevance scores provided."},
-        {"role": "user", "content": f"Question: {question}\n\nTop 3 Lawyers Information:\n{primary_context}\n\nSecondary Information (including relevance scores):\n{secondary_context}\n\nBased on all this information, provide your final recommendation for the most suitable lawyer(s) and explain your reasoning in detail. Consider the relevance scores when making your recommendation. Recommend up to 3 lawyers, but only if they are relevant to the query. If fewer than 3 lawyers are relevant, only recommend those who are truly suitable."}
+        {"role": "user", "content": f"Question: {question}\n\nTop Lawyers Information:\n{primary_context}\n\nRelated Matters (including relevance scores):\n{secondary_context}\n\nBased on all this information, provide your final recommendation for the most suitable lawyer(s) and explain your reasoning in detail. Consider the relevance scores when making your recommendation. Recommend up to 3 lawyers, discussing their relevant experience and matters they've worked on. If fewer than 3 lawyers are relevant, only recommend those who are truly suitable."}
     ]
 
     claude_response = call_claude(messages)
