@@ -106,7 +106,6 @@ st.title("Rolodex AI: Find Your Ideal Lawyers 👨‍⚖️ Utilizing Claude 2.1
 st.write("Ask questions about the top lawyers for specific legal needs:")
 
 default_questions = {
-    "Who are the top lawyers for corporate law?": "corporate law",
     "Which attorneys have the most experience with intellectual property?": "intellectual property",
     "Can you recommend lawyers specializing in employment law?": "employment law",
     "Who are the best litigators for financial cases?": "financial law",
