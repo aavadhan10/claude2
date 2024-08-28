@@ -38,32 +38,25 @@ def call_claude(messages):
     try:
         st.write("Calling Claude 3.5 Sonnet...")
 
-        # Manually define the prompt tokens
-        HUMAN_PROMPT = "\n\nHuman:"
-        ASSISTANT_PROMPT = "\n\nAssistant:"
-
         # Construct the prompt in the required format
         system_message = messages[0]['content'] if messages[0]['role'] == 'system' else ""
         user_message = next(msg['content'] for msg in messages if msg['role'] == 'user')
 
-        prompt = f"{HUMAN_PROMPT} {user_message}{ASSISTANT_PROMPT}"
+        prompt = f"{system_message}\n\nHuman: {user_message}\n\nAssistant:"
 
-        # Use the correct method for generating a completion with the required header
-        response = client.completion(
+        response = client.completions.create(
             prompt=prompt,
-            model="claude-3.5",
+            model="claude-3.5-sonnet",
             max_tokens_to_sample=150,
             temperature=0.9,
-            anthropic_version="2023-01-01"  # Example date; replace with the correct version date
+            anthropic_version="2024-01-01"  # Replace with the actual version you are using
         )
-
         st.write("Received response from Claude 3.5 Sonnet")
         return response['completion'].strip()
-
     except Exception as e:
         st.error(f"An unexpected error occurred: {e}")
         return None
-
+        
 # Function to query Claude with context from the vector DB
 def query_claude_with_data(question, matters_data, matters_index, matters_vectorizer):
     try:
