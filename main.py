@@ -5,9 +5,8 @@ import faiss
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import normalize
 from anthropic import Anthropic, HUMAN_PROMPT, AI_PROMPT
-import re
-import unicodedata
 
+@st.cache_resource
 def init_anthropic_client():
     claude_api_key = st.secrets["claude"]["CLAUDE_API_KEY"]
     if not claude_api_key:
@@ -15,44 +14,13 @@ def init_anthropic_client():
         st.stop()
     return Anthropic(api_key=claude_api_key)
 
-@st.cache_resource
-def get_anthropic_client():
-    return init_anthropic_client()
-
-client = get_anthropic_client()
+client = init_anthropic_client()
 
 @st.cache_data
-def load_and_clean_data(file_path, encoding='utf-8'):
-    try:
-        data = pd.read_csv(file_path, encoding=encoding)
-    except UnicodeDecodeError:
-        # If UTF-8 fails, try latin-1
-        data = pd.read_csv(file_path, encoding='latin-1')
-    
-    def clean_text(text):
-        if isinstance(text, str):
-            # Remove non-printable characters
-            text = ''.join(char for char in text if char.isprintable())
-            # Normalize unicode characters
-            text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('ascii')
-            # Replace specific problematic sequences
-            text = text.replace('Ã¢ÂÂ', "'").replace('Ã¢ÂÂ¨', ", ")
-            # Remove any remaining unicode escape sequences
-            text = re.sub(r'\\u[0-9a-fA-F]{4}', '', text)
-            # Replace multiple spaces with a single space
-            text = re.sub(r'\s+', ' ', text).strip()
-        return text
-    
-    # Clean column names
+def load_and_clean_data(file_path, encoding='latin1'):
+    data = pd.read_csv(file_path, encoding=encoding)
     data.columns = data.columns.str.replace('ï»¿', '').str.replace('Ã', '').str.strip()
-    
-    # Clean text in all columns
-    for col in data.columns:
-        data[col] = data[col].apply(clean_text)
-    
-    # Remove unnamed columns
     data = data.loc[:, ~data.columns.str.contains('^Unnamed')]
-    
     return data
 
 @st.cache_resource
@@ -100,38 +68,34 @@ def call_claude(messages):
 
 def query_claude_with_data(question, matters_data, matters_index, matters_vectorizer):
     question_vec = matters_vectorizer.transform([question])
-    D, I = matters_index.search(normalize(question_vec).toarray(), k=20)  # Increased to top 20 matches
+    D, I = matters_index.search(normalize(question_vec).toarray(), k=5)
     
     relevant_data = matters_data.iloc[I[0]]
     
-    primary_info = relevant_data[['Attorney', 'Work Email', 'Role Detail', 'Practice Group', 'Summary', 'Area of Expertise']].drop_duplicates(subset=['Attorney'])
+    primary_info = relevant_data[['Attorney', 'Role Detail', 'Practice Group', 'Summary', 'Area of Expertise']].drop_duplicates(subset=['Attorney'])
     secondary_info = relevant_data[['Attorney', 'Matter Description']].drop_duplicates(subset=['Attorney'])
     
-    # Combine primary and secondary info for each lawyer
-    combined_info = []
-    for _, lawyer in primary_info.iterrows():
-        lawyer_matters = secondary_info[secondary_info['Attorney'] == lawyer['Attorney']]['Matter Description'].tolist()
-        combined_info.append(f"Lawyer: {lawyer['Attorney']}\nEmail: {lawyer['Work Email']}\nRole: {lawyer['Role Detail']}\nPractice Group: {lawyer['Practice Group']}\nSummary: {lawyer['Summary']}\nArea of Expertise: {lawyer['Area of Expertise']}\nMatter Descriptions: {'; '.join(lawyer_matters)}\n\n")
-    
-    combined_context = "\n".join(combined_info)
+    primary_context = primary_info.to_string(index=False)
+    secondary_context = secondary_info.to_string(index=False)
     
     messages = [
-        {"role": "system", "content": "You are an expert legal consultant tasked with recommending the best lawyer(s) based on the given information. Analyze the information about multiple lawyers, including their expertise, practice areas, and matter descriptions. Provide a ranked list of the top 3 most suitable lawyers for the given query, explaining your reasoning for each recommendation."},
-        {"role": "user", "content": f"Question: {question}\n\nLawyer Information:\n{combined_context}\n\nBased on this information, who are the top 3 most suitable lawyers for this query? Provide a ranked list with explanations for each recommendation."}
+        {"role": "system", "content": "You are an expert legal consultant tasked with recommending the best lawyer based on the given information. You must always recommend at least one specific lawyer, even if the match isn't perfect. First, analyze the primary information about the lawyers. Then, consider the secondary information about their matters to refine your recommendation."},
+        {"role": "user", "content": f"Question: {question}\n\nPrimary Lawyer Information:\n{primary_context}\n\nBased on this primary information, who are the top candidates and why?\n\nNow, consider this additional information about their matters:\n{secondary_context}\n\nGiven all this information, provide your final recommendation for the most suitable lawyer(s) and explain your reasoning in detail. Remember, you must recommend at least one specific lawyer by name, even if they're not a perfect match for the query."}
     ]
     
     claude_response = call_claude(messages)
     if not claude_response:
         return
     
-    st.write("### Claude's Recommendations:")
+    st.write("### Claude's Recommendation:")
     st.write(claude_response)
     
-    st.write("### All Relevant Lawyers' Information:")
-    st.write(primary_info.to_html(index=False), unsafe_allow_html=True)
+    st.write("### Recommended Lawyer(s) Information:")
+    recommended_lawyers = primary_info['Attorney'].tolist()
+    st.write(primary_info[primary_info['Attorney'].isin(recommended_lawyers)].to_html(index=False), unsafe_allow_html=True)
     
-    st.write("### Related Matters of Relevant Lawyers:")
-    st.write(secondary_info.to_html(index=False), unsafe_allow_html=True)
+    st.write("### Related Matters of Recommended Lawyer(s):")
+    st.write(secondary_info[secondary_info['Attorney'].isin(recommended_lawyers)].to_html(index=False), unsafe_allow_html=True)
 
 # Streamlit app layout
 st.title("Rolodex AI: Find Your Ideal Lawyer 👨‍⚖️ Utilizing Claude 2.1")
@@ -153,7 +117,7 @@ for question, _ in default_questions.items():
         break
 
 if user_input:
-    matters_data = load_and_clean_data('Cleaned_Matters_Data.csv')
+    matters_data = load_and_clean_data('Cleaned_Matters_Data.csv', encoding='latin1')
     if not matters_data.empty:
         matters_index, matters_vectorizer = create_weighted_vector_db(matters_data)
         query_claude_with_data(user_input, matters_data, matters_index, matters_vectorizer)
@@ -171,6 +135,9 @@ else:
 
 if st.button("Submit Feedback"):
     if custom_feedback:
+        st.write(f"Thank you for your feedback: '{custom_feedback}'")
+    else:
+        st.error("Please provide feedback before submitting.")
         st.write(f"Thank you for your feedback: '{custom_feedback}'")
     else:
         st.error("Please provide feedback before submitting.")
