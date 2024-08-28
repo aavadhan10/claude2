@@ -13,6 +13,7 @@ claude_api_key = st.secrets["claude"]["CLAUDE_API_KEY"]
 if not claude_api_key:
     st.error("Anthropic API key not found. Please check your Streamlit secrets configuration.")
     st.stop()
+
 @st.cache_resource
 def init_anthropic_client():
     claude_api_key = st.secrets["claude"]["CLAUDE_API_KEY"]
@@ -21,7 +22,6 @@ def init_anthropic_client():
         st.stop()
     return Anthropic(api_key=claude_api_key)
 
-client = Anthropic(api_key=claude_api_key)
 client = init_anthropic_client()
 
 # Load and clean CSV data with specified encoding
@@ -32,8 +32,6 @@ def load_and_clean_data(file_path, encoding='latin1'):
     data.columns = data.columns.str.replace('ï»¿', '').str.replace('Ã', '').str.strip()  # Clean unusual characters and whitespace
     data = data.loc[:, ~data.columns.str.contains('^Unnamed')]  # Remove unnamed columns
     st.write(f"Data loaded and cleaned in {time.time() - start_time:.2f} seconds")
-    data.columns = data.columns.str.replace('ï»¿', '').str.replace('Ã', '').str.strip()
-    data = data.loc[:, ~data.columns.str.contains('^Unnamed')]
     return data
 
 # Create vector database for a given dataframe and columns
@@ -41,6 +39,14 @@ def load_and_clean_data(file_path, encoding='latin1'):
 def create_vector_db(data, columns):
     start_time = time.time()
     combined_text = data[columns].fillna('').apply(lambda x: ' '.join(x.astype(str)), axis=1)
+    vectorizer = TfidfVectorizer(stop_words='english', max_features=5000)
+    X = vectorizer.fit_transform(combined_text)
+    X = normalize(X)
+    index = faiss.IndexFlatL2(X.shape[1])
+    index.add(X.toarray())
+    st.write(f"Vector DB created in {time.time() - start_time:.2f} seconds")
+    return index, vectorizer
+
 def create_weighted_vector_db(data):
     weights = {
         'Attorney': 2.0,
@@ -61,7 +67,6 @@ def create_weighted_vector_db(data):
     X = normalize(X)
     index = faiss.IndexFlatL2(X.shape[1])
     index.add(X.toarray())
-    st.write(f"Vector DB created in {time.time() - start_time:.2f} seconds")
     return index, vectorizer
 
 # Function to call Claude with correct prompt format
@@ -77,11 +82,8 @@ def call_claude(messages):
         prompt = f"{system_message}\n\n{HUMAN_PROMPT} {user_message}{AI_PROMPT}"
 
         # Call the Claude model using the new API structure
-
         response = client.completions.create(
             model="claude-2.1",
-            max_tokens_to_sample=150,
-            temperature=0.9,
             max_tokens_to_sample=500,
             temperature=0.7,
             prompt=prompt
@@ -92,7 +94,6 @@ def call_claude(messages):
 
     except Exception as e:
         st.error(f"An unexpected error occurred: {e}")
-        st.error(f"Error calling Claude: {e}")
         return None
 
 # Function to query Claude with context from the vector DB
@@ -152,71 +153,6 @@ def query_claude_with_data(question, matters_data, matters_index, matters_vector
     except Exception as e:
         st.error(f"Error querying Claude: {e}")
 
-# Streamlit app layout
-st.title("Rolodex AI: Find Your Ideal Lawyer 👨‍⚖️ Utilizing Claude 3.5 Sonnet")
-st.write("Ask questions about the top lawyers in a specific practice area:")
-
-# Default questions as buttons
-default_questions = {
-    "Who are the top lawyers for corporate law?": "corporate law",
-    "Which attorneys have the most experience with intellectual property?": "intellectual property",
-    "Can you recommend a lawyer specializing in employment law?": "employment law",
-    "Who are the best litigators for financial cases?": "financial law",
-    "Which lawyer should I contact for real estate matters?": "real estate"
-}
-
-# Check if a default question button is clicked
-user_input = ""
-for question_text, question_value in default_questions.items():
-    if st.button(question_text):
-        user_input = question_text
-        break
-
-# Also allow users to input custom questions
-if not user_input:
-    user_input = st.text_input("Or type your own question:", placeholder="e.g., 'Who are the top lawyers for corporate law?'")
-
-if user_input:
-    st.cache_data.clear()  # Clear cache before each search
-
-    # Load CSV data on the backend
-    matters_data = load_and_clean_data('Cleaned_Matters_Data.csv', encoding='latin1')  # Ensure correct file path and encoding
-
-    if not matters_data.empty:
-        # Ensure the correct column names are used
-        matters_index, matters_vectorizer = create_vector_db(matters_data, ['Attorney', 'Matter Description'])
-
-        if matters_index is not None:
-    question_vec = matters_vectorizer.transform([question])
-    D, I = matters_index.search(normalize(question_vec).toarray(), k=5)
-
-    relevant_data = matters_data.iloc[I[0]]
-
-    primary_info = relevant_data[['Attorney', 'Role Detail', 'Practice Group', 'Summary', 'Area of Expertise']].drop_duplicates(subset=['Attorney'])
-    secondary_info = relevant_data[['Attorney', 'Matter Description']].drop_duplicates(subset=['Attorney'])
-
-    primary_context = primary_info.to_string(index=False)
-    secondary_context = secondary_info.to_string(index=False)
-
-    messages = [
-        {"role": "system", "content": "You are an expert legal consultant tasked with recommending the best lawyer based on the given information. You must always recommend at least one specific lawyer, even if the match isn't perfect. First, analyze the primary information about the lawyers. Then, consider the secondary information about their matters to refine your recommendation."},
-        {"role": "user", "content": f"Question: {question}\n\nPrimary Lawyer Information:\n{primary_context}\n\nBased on this primary information, who are the top candidates and why?\n\nNow, consider this additional information about their matters:\n{secondary_context}\n\nGiven all this information, provide your final recommendation for the most suitable lawyer(s) and explain your reasoning in detail. Remember, you must recommend at least one specific lawyer by name, even if they're not a perfect match for the query."}
-    ]
-
-    claude_response = call_claude(messages)
-    if not claude_response:
-        return
-
-    st.write("### Claude's Recommendation:")
-    st.write(claude_response)
-
-    st.write("### Recommended Lawyer(s) Information:")
-    recommended_lawyers = primary_info['Attorney'].tolist()
-    st.write(primary_info[primary_info['Attorney'].isin(recommended_lawyers)].to_html(index=False), unsafe_allow_html=True)
-
-    st.write("### Related Matters of Recommended Lawyer(s):")
-    st.write(secondary_info[secondary_info['Attorney'].isin(recommended_lawyers)].to_html(index=False), unsafe_allow_html=True)
-
 def main():
     st.title("Rolodex AI: Find Your Ideal Lawyer 👨‍⚖️ Utilizing Claude 2.1")
     st.write("Ask questions about the top lawyers for specific legal needs:")
@@ -241,19 +177,13 @@ def main():
         if not matters_data.empty:
             matters_index, matters_vectorizer = create_weighted_vector_db(matters_data)
             query_claude_with_data(user_input, matters_data, matters_index, matters_vectorizer)
-    else:
-        st.error("Failed to load data.")
         else:
             st.error("Failed to load data.")
 
-    # Accuracy feedback section
     # Feedback section
     st.write("### How accurate was this result?")
     accuracy_options = ["Accurate", "Not Accurate", "Type your own feedback"]
     accuracy_choice = st.radio("Please select one:", accuracy_options)
-
-    # If user chooses to type their own feedback, display a text input field
-    accuracy_choice = st.radio("Please select one:", ["Accurate", "Not Accurate", "Type your own feedback"])
 
     if accuracy_choice == "Type your own feedback":
         custom_feedback = st.text_input("Please provide your feedback:")
