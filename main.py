@@ -55,11 +55,15 @@ def call_claude(messages):
             prompt=prompt,
             model="claude-3.5-sonnet",
             max_tokens_to_sample=150,
-            temperature=0.9,
-        )
+            temperature=0.9
+        )  # Removed the extra comma here
 
         st.write("Received response from Claude 3.5 Sonnet")
         return response['completion'].strip()
+
+    except Exception as e:
+        st.error(f"An unexpected error occurred: {e}")
+        return None
 
     except Exception as e:
         st.error(f"An unexpected error occurred: {e}")
