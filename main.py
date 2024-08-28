@@ -8,7 +8,7 @@ import time
 
 # Initialize Claude API using environment variable
 claude_api_key = st.secrets["claude"]["CLAUDE_API_KEY"]
-client = anthropic.Anthropic(api_key=claude_api_key)
+client = anthropic.Client(api_key=claude_api_key)
 
 # Load and clean CSV data with specified encoding
 @st.cache_data
@@ -33,24 +33,33 @@ def create_vector_db(data, columns):
     st.write(f"Vector DB created in {time.time() - start_time:.2f} seconds")
     return index, vectorizer
 
-# Function to call Claude using the Anthropic SDK
+# Function to call Claude with correct prompt format
 def call_claude(messages):
-    prompt = "\n\n".join([f"{m['role']}: {m['content']}" for m in messages])
-    
     try:
         st.write("Calling Claude 3.5 Sonnet...")
         
-        response = client.completions.create(
-            model="claude-3.5",
-            prompt=prompt,
-            max_tokens_to_sample=150,
-            temperature=0.9
-        )
+        # Construct the prompt in the required format
+        system_message = messages[0]['content'] if messages[0]['role'] == 'system' else ""
+        user_message = next(msg['content'] for msg in messages if msg['role'] == 'user')
         
+        prompt = f"{system_message}\n\nHuman: {user_message}\n\nAssistant:"
+        
+        response = client.completion(
+            prompt=prompt,
+            model="claude-3.5-sonnet",
+            max_tokens_to_sample=150,
+            temperature=0.9,
+        )
         st.write("Received response from Claude 3.5 Sonnet")
-        return response['completion'].strip()
-    except anthropic.AnthropicError as e:
-        st.error(f"An error occurred while communicating with Claude: {e}")
+        return response.completion.strip()
+    except anthropic.APIConnectionError as e:
+        st.error(f"The request to Claude timed out or failed to connect: {e}")
+        return None
+    except anthropic.APIStatusError as e:
+        st.error(f"An API error occurred: {e}")
+        return None
+    except Exception as e:
+        st.error(f"An unexpected error occurred: {e}")
         return None
 
 # Function to query Claude with context from the vector DB
@@ -59,33 +68,33 @@ def query_claude_with_data(question, matters_data, matters_index, matters_vector
         st.write("Processing query...")
         question = ' '.join(question.split()[-3:])  # Consider the last three words in the query
         question_vec = matters_vectorizer.transform([question])
-        
+
         st.write("Performing vector search...")
         D, I = matters_index.search(normalize(question_vec).toarray(), k=10)
-        
+
         if I.size > 0 and not (I == -1).all():
             relevant_data = matters_data.iloc[I[0]]
         else:
             relevant_data = matters_data.head(1)  # Fallback to the first entry if no match found
-        
+
         st.write("Filtering relevant data...")
         filtered_data = relevant_data[['Attorney', 'Practice Area', 'Matter Description', 'Work Email', 'Role Detail']].rename(columns={'Role Detail': 'Role'}).drop_duplicates(subset=['Attorney'])
-        
+
         if filtered_data.empty:
             filtered_data = matters_data[['Attorney', 'Practice Area', 'Matter Description', 'Work Email', 'Role Detail']].rename(columns={'Role Detail': 'Role'}).dropna(subset=['Attorney']).drop_duplicates(subset=['Attorney']).head(1)
 
         context = filtered_data.to_string(index=False)
         messages = [
-            {"role": "system", "content": "You are the CEO of a prestigious law firm..."},
+            {"role": "system", "content": "You are the CEO of a prestigious law firm."},
             {"role": "user", "content": f"Based on the following information, please make a recommendation:\n\n{context}\n\nRecommendation:"}
         ]
-        
+
         st.write("Calling Claude 3.5 Sonnet for recommendation...")
         claude_response = call_claude(messages)
-        
+
         if not claude_response:
             return
-        
+
         st.write("Processing Claude's recommendations...")
         recommendations = claude_response.split('\n')
         recommendations = [rec for rec in recommendations if rec.strip()]
@@ -136,11 +145,11 @@ if user_input:
 
     # Load CSV data on the backend
     matters_data = load_and_clean_data('Cleaned_Matters_Data.csv', encoding='latin1')  # Ensure correct file path and encoding
-    
+
     if not matters_data.empty:
         # Ensure the correct column names are used
         matters_index, matters_vectorizer = create_vector_db(matters_data, ['Attorney', 'Matter Description'])  # Adjusted columns
-        
+
         if matters_index is not None:
             query_claude_with_data(user_input, matters_data, matters_index, matters_vectorizer)
     else:
