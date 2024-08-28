@@ -34,66 +34,22 @@ def create_vector_db(data, columns):
     return index, vectorizer
 
 # Function to call Claude with correct prompt format
-
 def call_claude(messages):
     try:
         st.write("Calling Claude 3.5 Sonnet...")
-
-        # Define prompt tokens
-        HUMAN_PROMPT = anthropic.HUMAN_PROMPT
-        ASSISTANT_PROMPT = anthropic.ASSISTANT_PROMPT
-
+        
         # Construct the prompt in the required format
         system_message = messages[0]['content'] if messages[0]['role'] == 'system' else ""
         user_message = next(msg['content'] for msg in messages if msg['role'] == 'user')
-
-        # Start the prompt with the required HUMAN_PROMPT token
-        prompt = f"{system_message}{HUMAN_PROMPT} {user_message}{ASSISTANT_PROMPT}"
-
-        # Use the correct method for generating a completion
-        response = client.completion(
+        
+        prompt = f"{system_message}\n\nHuman: {user_message}\n\nAssistant:"
+        
+        response = client.create_completion(  # Adjusted to the correct method
             prompt=prompt,
             model="claude-3.5-sonnet",
             max_tokens_to_sample=150,
-            temperature=0.9
-        )  # Removed the extra comma here
-
-        st.write("Received response from Claude 3.5 Sonnet")
-        return response['completion'].strip()
-
-    except Exception as e:
-        st.error(f"An unexpected error occurred: {e}")
-        return None
-
-    except Exception as e:
-        st.error(f"An unexpected error occurred: {e}")
-        return None
-
-    except Exception as e:
-        st.error(f"An unexpected error occurred: {e}")
-        return None
+            temperature=0.9,
         )
-        st.write("Received response from Claude 3.5 Sonnet")
-        return response['completion'].strip()
-
-    except Exception as e:
-        st.error(f"An unexpected error occurred: {e}")
-        return None
-        st.write("Received response from Claude 3.5 Sonnet")
-        return response['completion'].strip()
-    except Exception as e:
-        st.error(f"An unexpected error occurred: {e}")
-        return None
-        st.write("Received response from Claude 3.5 Sonnet")
-        return response['completion'].strip()
-    except Exception as e:
-        st.error(f"An unexpected error occurred: {e}")
-        return None
-        st.write("Received response from Claude 3.5 Sonnet")
-        return response['completion'].strip()
-    except Exception as e:
-        st.error(f"An unexpected error occurred: {e}")
-        return None
         st.write("Received response from Claude 3.5 Sonnet")
         return response['completion'].strip()  # Ensure this accesses the correct field in the response
     except anthropic.APIConnectionError as e:
