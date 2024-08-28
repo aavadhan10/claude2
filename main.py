@@ -4,7 +4,7 @@ import numpy as np
 import faiss
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import normalize
-from anthropic import Anthropic, HUMAN_PROMPT, AI_PROMPT
+from anthropic import Anthropic
 import re
 import unicodedata
 
@@ -20,77 +20,28 @@ client = init_anthropic_client()
 
 @st.cache_data
 def load_and_clean_data(file_path, encoding='utf-8'):
-    try:
-        data = pd.read_csv(file_path, encoding=encoding)
-    except UnicodeDecodeError:
-        # If UTF-8 fails, try latin-1
-        data = pd.read_csv(file_path, encoding='latin-1')
-    
-    def clean_text(text):
-        if isinstance(text, str):
-            # Remove non-printable characters
-            text = ''.join(char for char in text if char.isprintable())
-            # Normalize unicode characters
-            text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('ascii')
-            # Replace specific problematic sequences
-            text = text.replace('Ã¢ÂÂ', "'").replace('Ã¢ÂÂ¨', ", ")
-            # Remove any remaining unicode escape sequences
-            text = re.sub(r'\\u[0-9a-fA-F]{4}', '', text)
-            # Replace multiple spaces with a single space
-            text = re.sub(r'\s+', ' ', text).strip()
-        return text
-    
-    # Clean column names
-    data.columns = data.columns.str.replace('ï»¿', '').str.replace('Ã', '').str.strip()
-    
-    # Clean text in all columns
-    for col in data.columns:
-        data[col] = data[col].apply(clean_text)
-    
-    # Remove unnamed columns
-    data = data.loc[:, ~data.columns.str.contains('^Unnamed')]
-    
-    return data
+    # ... (keep the existing load_and_clean_data function)
 
 @st.cache_resource
 def create_weighted_vector_db(data):
-    weights = {
-        'Attorney': 2.0,
-        'Role Detail': 2.0,
-        'Practice Group': 1.5,
-        'Summary': 1.5,
-        'Area of Expertise': 1.5,
-        'Matter Description': 1.0
-    }
-    
-    def weighted_text(row):
-        return ' '.join([
-            ' '.join([str(row[col])] * int(weight * 10))
-            for col, weight in weights.items() if col in row.index
-        ])
-    
-    combined_text = data.apply(weighted_text, axis=1)
-    
-    vectorizer = TfidfVectorizer(stop_words='english', max_features=5000)
-    X = vectorizer.fit_transform(combined_text)
-    X = normalize(X)
-    index = faiss.IndexFlatL2(X.shape[1])
-    index.add(X.toarray())
-    return index, vectorizer
+    # ... (keep the existing create_weighted_vector_db function)
 
 def call_claude(messages):
     try:
-        system_message = messages[0]['content'] if messages[0]['role'] == 'system' else ""
-        user_message = next(msg['content'] for msg in messages if msg['role'] == 'user')
-        prompt = f"{system_message}\n\n{HUMAN_PROMPT} {user_message}{AI_PROMPT}"
+        st.write("Calling Claude 3 Sonnet...")
         
-        response = client.completions.create(
-            model="claude-2.1",
-            max_tokens_to_sample=500,
+        response = client.messages.create(
+            model="claude-3-sonnet-20240229",
+            max_tokens=1000,
             temperature=0.7,
-            prompt=prompt
+            messages=[
+                {"role": "system", "content": messages[0]['content']},
+                {"role": "user", "content": messages[1]['content']}
+            ]
         )
-        return response.completion
+        
+        st.write("Received response from Claude 3 Sonnet")
+        return response.content[0].text
     except Exception as e:
         st.error(f"Error calling Claude: {e}")
         return None
@@ -127,7 +78,7 @@ def query_claude_with_data(question, matters_data, matters_index, matters_vector
     st.write(secondary_info[secondary_info['Attorney'].isin(recommended_lawyers)].to_html(index=False), unsafe_allow_html=True)
 
 # Streamlit app layout
-st.title("Rolodex AI: Find Your Ideal Lawyer 👨‍⚖️ Utilizing Claude 2.1")
+st.title("Rolodex AI: Find Your Ideal Lawyer 👨‍⚖️ Utilizing Claude 3 Sonnet")
 st.write("Ask questions about the top lawyers for specific legal needs:")
 
 default_questions = {
