@@ -136,5 +136,4 @@ def main():
         else:
             st.error("Please provide feedback before submitting.")
 
-if __name__ == "__main__":
-    main()
+
