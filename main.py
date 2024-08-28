@@ -34,6 +34,7 @@ def create_vector_db(data, columns):
     return index, vectorizer
 
 # Function to call Claude with correct prompt format
+
 def call_claude(messages):
     try:
         st.write("Calling Claude 3.5 Sonnet...")
@@ -42,15 +43,16 @@ def call_claude(messages):
         system_message = messages[0]['content'] if messages[0]['role'] == 'system' else ""
         user_message = next(msg['content'] for msg in messages if msg['role'] == 'user')
 
-        prompt = f"{system_message}\n\nHuman: {user_message}\n\nAssistant:"
+        # Ensure the prompt starts with anthropic.HUMAN_PROMPT
+        prompt = f"{system_message}{anthropic.HUMAN_PROMPT} {user_message}{anthropic.AI_PROMPT}"
 
         # Call the completion method correctly
         response = client.completion(
             prompt=prompt,
-            model="claude-2",  # Ensure this matches the correct model version
+            model="claude-3.5 Sonnet",  # Ensure this matches the correct model version
             max_tokens_to_sample=150,
             temperature=0.9,
-            stop_sequences=["\n\nHuman:"],  # Adjust stop sequences as necessary
+            stop_sequences=[anthropic.HUMAN_PROMPT],  # Adjust stop sequences as necessary
         )
 
         st.write("Received response from Claude")
