@@ -20,110 +20,16 @@ client = init_anthropic_client()
 
 @st.cache_data
 def load_and_clean_data(file_path, encoding='utf-8'):
-    try:
-        data = pd.read_csv(file_path, encoding=encoding)
-    except UnicodeDecodeError:
-        # If UTF-8 fails, try latin-1
-        data = pd.read_csv(file_path, encoding='latin-1')
-    
-    def clean_text(text):
-        if isinstance(text, str):
-            # Remove non-printable characters
-            text = ''.join(char for char in text if char.isprintable())
-            # Normalize unicode characters
-            text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('ascii')
-            # Replace specific problematic sequences
-            text = text.replace('Ã¢ÂÂ', "'").replace('Ã¢ÂÂ¨', ", ")
-            # Remove any remaining unicode escape sequences
-            text = re.sub(r'\\u[0-9a-fA-F]{4}', '', text)
-            # Replace multiple spaces with a single space
-            text = re.sub(r'\s+', ' ', text).strip()
-        return text
-    
-    # Clean column names
-    data.columns = data.columns.str.replace('ï»¿', '').str.replace('Ã', '').str.strip()
-    
-    # Clean text in all columns
-    for col in data.columns:
-        data[col] = data[col].apply(clean_text)
-    
-    # Remove unnamed columns
-    data = data.loc[:, ~data.columns.str.contains('^Unnamed')]
-    
-    return data
+    # ... (keep the existing load_and_clean_data function)
 
 @st.cache_resource
 def create_weighted_vector_db(data):
-    weights = {
-        'Attorney': 2.0,
-        'Role Detail': 2.0,
-        'Practice Group': 1.5,
-        'Summary': 1.5,
-        'Area of Expertise': 1.5,
-        'Matter Description': 1.0
-    }
-    
-    def weighted_text(row):
-        return ' '.join([
-            ' '.join([str(row[col])] * int(weight * 10))
-            for col, weight in weights.items() if col in row.index
-        ])
-    
-    combined_text = data.apply(weighted_text, axis=1)
-    
-    vectorizer = TfidfVectorizer(stop_words='english', max_features=5000)
-    X = vectorizer.fit_transform(combined_text)
-    X = normalize(X)
-    index = faiss.IndexFlatL2(X.shape[1])
-    index.add(X.toarray())
-    return index, vectorizer
+    # ... (keep the existing create_weighted_vector_db function)
 
 def call_claude(messages):
-    try:
-        system_message = messages[0]['content'] if messages[0]['role'] == 'system' else ""
-        user_message = next(msg['content'] for msg in messages if msg['role'] == 'user')
-        prompt = f"{system_message}\n\n{HUMAN_PROMPT} {user_message}{AI_PROMPT}"
-        
-        response = client.completions.create(
-            model="claude-2.1",
-            max_tokens_to_sample=500,
-            temperature=0.7,
-            prompt=prompt
-        )
-        return response.completion
-    except Exception as e:
-        st.error(f"Error calling Claude: {e}")
-        return None
+    # ... (keep the existing call_claude function)
 
-def query_claude_with_data(question, matters_data, matters_index, matters_vectorizer):
-    question_vec = matters_vectorizer.transform([question])
-    D, I = matters_index.search(normalize(question_vec).toarray(), k=10)  # Increased to top 10 matches
-    
-    relevant_data = matters_data.iloc[I[0]]
-    
-    primary_info = relevant_data[['Attorney', 'Work Email', 'Role Detail', 'Practice Group', 'Summary', 'Area of Expertise']].drop_duplicates(subset=['Attorney'])
-    secondary_info = relevant_data[['Attorney', 'Matter Description']].drop_duplicates(subset=['Attorney'])
-    
-    primary_context = primary_info.to_string(index=False)
-    secondary_context = secondary_info.to_string(index=False)
-    
-    messages = [
-        {"role": "system", "content": "You are an expert legal consultant tasked with recommending the best lawyer(s) based on the given information. Analyze the primary information about multiple lawyers, then consider their matter descriptions to refine your recommendations. Always recommend at least one specific lawyer, even if not a perfect match."},
-        {"role": "user", "content": f"Question: {question}\n\nPrimary Lawyer Information:\n{primary_context}\n\nBased on this primary information, who are the top candidates and why?\n\nAdditional Matter Descriptions:\n{secondary_context}\n\nConsider all this information and provide your final recommendations for the most suitable lawyer(s), explaining your reasoning in detail. Rank your recommendations if possible."}
-    ]
-    
-    claude_response = call_claude(messages)
-    if not claude_response:
-        return
-    
-    st.write("### Claude's Recommendation:")
-    st.write(claude_response)
-    
-    st.write("### All Relevant Lawyers' Information:")
-    st.write(primary_info.to_html(index=False), unsafe_allow_html=True)
-    
-    st.write("### Related Matters of Relevant Lawyers:")
-    st.write(secondary_info.to_html(index=False), unsafe_allow_html=True)
+# Insert the updated query_claude_with_data function here
 
 # Streamlit app layout
 st.title("Rolodex AI: Find Your Ideal Lawyer 👨‍⚖️ Utilizing Claude 2.1")
