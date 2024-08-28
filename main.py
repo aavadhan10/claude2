@@ -57,7 +57,7 @@ def call_claude(messages):
 
         response = client.completions.create(
             model="claude-2.1",
-            max_tokens_to_sample=1000,
+            max_tokens_to_sample=2000,  # Increased for more detailed responses
             temperature=0.7,
             prompt=prompt
         )
@@ -67,45 +67,52 @@ def call_claude(messages):
         return None
 
 def query_claude_with_data(question, matters_data, matters_index, matters_vectorizer):
-    question_vec = matters_vectorizer.transform([question])
-    D, I = matters_index.search(normalize(question_vec).toarray(), k=10)
+    try:
+        question_vec = matters_vectorizer.transform([question])
+        D, I = matters_index.search(normalize(question_vec).toarray(), k=50)  # Increased to top 50 matches
 
-    relevant_data = matters_data.iloc[I[0]]
+        relevant_data = matters_data.iloc[I[0]]
 
-    primary_info = relevant_data[['Attorney', 'Role Detail', 'Practice Group', 'Summary', 'Area of Expertise']].drop_duplicates(subset=['Attorney'])
-    secondary_info = relevant_data[['Attorney', 'Matter Description']].drop_duplicates(subset=['Attorney'])
+        primary_info = relevant_data[['Attorney', 'Role Detail', 'Practice Group', 'Summary', 'Area of Expertise']].drop_duplicates(subset=['Attorney'])
+        secondary_info = relevant_data[['Attorney', 'Matter Description']].drop_duplicates(subset=['Attorney'])
 
-    # Combine primary and secondary info for each lawyer
-    combined_info = []
-    for _, lawyer in primary_info.iterrows():
-        lawyer_matters = secondary_info[secondary_info['Attorney'] == lawyer['Attorney']]['Matter Description'].tolist()
-        combined_info.append(f"Lawyer: {lawyer['Attorney']}\nRole: {lawyer['Role Detail']}\nPractice Group: {lawyer['Practice Group']}\nSummary: {lawyer['Summary']}\nArea of Expertise: {lawyer['Area of Expertise']}\nMatter Descriptions: {'; '.join(lawyer_matters)}\n\n")
-    
-    combined_context = "\n".join(combined_info)
+        # Combine primary and secondary info for each lawyer
+        combined_info = []
+        for _, lawyer in primary_info.iterrows():
+            lawyer_matters = secondary_info[secondary_info['Attorney'] == lawyer['Attorney']]['Matter Description'].tolist()
+            combined_info.append(f"Lawyer: {lawyer['Attorney']}\nRole: {lawyer['Role Detail']}\nPractice Group: {lawyer['Practice Group']}\nSummary: {lawyer['Summary']}\nArea of Expertise: {lawyer['Area of Expertise']}\nMatter Descriptions: {'; '.join(lawyer_matters[:3])}\n\n")
+        
+        combined_context = "\n".join(combined_info)
 
-    messages = [
-        {"role": "system", "content": "You are an expert legal consultant tasked with recommending the best lawyers based on the given information. Analyze the information about multiple lawyers, including their expertise, practice areas, and matter descriptions. Provide a ranked list of the top 5 most suitable lawyers for the given query, explaining your reasoning for each recommendation."},
-        {"role": "user", "content": f"Question: {question}\n\nLawyer Information:\n{combined_context}\n\nBased on this information, who are the top 5 most suitable lawyers for this query? Provide a ranked list with brief explanations for each recommendation."}
-    ]
+        messages = [
+            {"role": "system", "content": "You are an expert legal consultant tasked with recommending the best lawyers based on the given information. Analyze the information about multiple lawyers, including their expertise, practice areas, and matter descriptions. Provide a ranked list of the top 5 most suitable lawyers for the given query, explaining your reasoning for each recommendation. If there are fewer than 5 suitable lawyers, only recommend those who are truly relevant."},
+            {"role": "user", "content": f"Question: {question}\n\nLawyer Information:\n{combined_context}\n\nBased on this information, who are the top 5 (or fewer if there aren't 5 suitable candidates) most suitable lawyers for this query? Provide a ranked list with brief explanations for each recommendation."}
+        ]
 
-    claude_response = call_claude(messages)
-    if not claude_response:
-        return
+        claude_response = call_claude(messages)
+        if not claude_response:
+            st.error("Failed to get a response from Claude. Please try again.")
+            return
 
-    st.write("### Claude's Recommendations:")
-    st.write(claude_response)
+        st.write("### Claude's Recommendations:")
+        st.write(claude_response)
 
-    st.write("### All Relevant Lawyers' Information:")
-    st.write(primary_info.to_html(index=False), unsafe_allow_html=True)
+        st.write("### All Relevant Lawyers' Information:")
+        st.write(primary_info.to_html(index=False), unsafe_allow_html=True)
 
-    st.write("### Related Matters of Relevant Lawyers:")
-    st.write(secondary_info.to_html(index=False), unsafe_allow_html=True)
+        st.write("### Related Matters of Relevant Lawyers:")
+        st.write(secondary_info.to_html(index=False), unsafe_allow_html=True)
+
+    except Exception as e:
+        st.error(f"An error occurred while processing the query: {str(e)}")
+        st.write("Please try again or contact support if the problem persists.")
 
 # Streamlit app layout
 st.title("Rolodex AI: Find Your Ideal Lawyers 👨‍⚖️ Utilizing Claude 2.1")
 st.write("Ask questions about the top lawyers for specific legal needs:")
 
 default_questions = {
+    "Who are the top lawyers for corporate law?": "corporate law",
     "Which attorneys have the most experience with intellectual property?": "intellectual property",
     "Can you recommend lawyers specializing in employment law?": "employment law",
     "Who are the best litigators for financial cases?": "financial law",
@@ -120,12 +127,16 @@ for question, _ in default_questions.items():
         break
 
 if user_input:
-    matters_data = load_and_clean_data('Cleaned_Matters_Data.csv', encoding='latin1')
-    if not matters_data.empty:
-        matters_index, matters_vectorizer = create_weighted_vector_db(matters_data)
-        query_claude_with_data(user_input, matters_data, matters_index, matters_vectorizer)
-    else:
-        st.error("Failed to load data.")
+    try:
+        matters_data = load_and_clean_data('Cleaned_Matters_Data.csv', encoding='latin1')
+        if not matters_data.empty:
+            matters_index, matters_vectorizer = create_weighted_vector_db(matters_data)
+            query_claude_with_data(user_input, matters_data, matters_index, matters_vectorizer)
+        else:
+            st.error("Failed to load data. The dataset appears to be empty.")
+    except Exception as e:
+        st.error(f"An error occurred while processing your request: {str(e)}")
+        st.write("Please try again or contact support if the problem persists.")
 
 # Feedback section
 st.write("### How accurate was this result?")
