@@ -8,6 +8,7 @@ from anthropic import Anthropic, HUMAN_PROMPT, AI_PROMPT
 import re
 import unicodedata
 
+@st.cache_resource
 def init_anthropic_client():
     claude_api_key = st.secrets["claude"]["CLAUDE_API_KEY"]
     if not claude_api_key:
@@ -15,11 +16,7 @@ def init_anthropic_client():
         st.stop()
     return Anthropic(api_key=claude_api_key)
 
-@st.cache_resource
-def get_anthropic_client():
-    return init_anthropic_client()
-
-client = get_anthropic_client()
+client = init_anthropic_client()
 
 @st.cache_data
 def load_and_clean_data(file_path, encoding='utf-8'):
@@ -83,22 +80,16 @@ def create_weighted_vector_db(data):
 
 def call_claude(messages):
     try:
-        st.write("Calling Claude...")
-        
-        system_message = messages[0]['content']
-        user_message = messages[1]['content']
-        
+        system_message = messages[0]['content'] if messages[0]['role'] == 'system' else ""
+        user_message = next(msg['content'] for msg in messages if msg['role'] == 'user')
         prompt = f"{system_message}\n\n{HUMAN_PROMPT} {user_message}{AI_PROMPT}"
         
         response = client.completions.create(
             model="claude-2.1",
-            prompt=prompt,
-            max_tokens_to_sample=1000,
+            max_tokens_to_sample=500,
             temperature=0.7,
-            stop_sequences=[HUMAN_PROMPT]
+            prompt=prompt
         )
-        
-        st.write("Received response from Claude")
         return response.completion
     except Exception as e:
         st.error(f"Error calling Claude: {e}")
@@ -136,7 +127,7 @@ def query_claude_with_data(question, matters_data, matters_index, matters_vector
     st.write(secondary_info[secondary_info['Attorney'].isin(recommended_lawyers)].to_html(index=False), unsafe_allow_html=True)
 
 # Streamlit app layout
-st.title("Rolodex AI: Find Your Ideal Lawyer 👨‍⚖️ Utilizing Claude")
+st.title("Rolodex AI: Find Your Ideal Lawyer 👨‍⚖️ Utilizing Claude 2.1")
 st.write("Ask questions about the top lawyers for specific legal needs:")
 
 default_questions = {
