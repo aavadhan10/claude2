@@ -73,7 +73,7 @@ def call_claude(messages):
     except Exception as e:
         st.error(f"An unexpected error occurred: {e}")
         return None
-        
+
 # Function to query Claude with context from the vector DB
 def query_claude_with_data(question, matters_data, matters_index, matters_vectorizer):
     try:
@@ -112,21 +112,21 @@ def query_claude_with_data(question, matters_data, matters_index, matters_vector
 
         st.write("Processing Claude's recommendations...")
         recommendations = claude_response.split('\n')
-        recommendations are [rec for rec in recommendations if rec.strip()]
+        recommendations = [rec for rec in recommendations if rec.strip()]
         recommendations = list(dict.fromkeys(recommendations))
         recommendations_df = pd.DataFrame(recommendations, columns=['Recommendation Reasoning'])
 
         st.write("Displaying results...")
-        top-recommended lawyers are filtered data drop duplicates subset=['Attorney'])
+        top_recommended_lawyers = filtered_data.drop_duplicates(subset=['Attorney'])
         st.write("All Potential Lawyers with Recommended Skillset:")
-        st.write(top-recommended-lawyers-to_html index=False), unsafe_allow_html=True)
+        st.write(top_recommended_lawyers.to_html(index=False), unsafe_allow_html=True)
         st.write("Recommendation Reasoning:")
-        st.write(recommendations_df to_html(index=False), unsafe_allow_html=True)
+        st.write(recommendations_df.to_html(index=False), unsafe_allow_html=True)
 
-        for lawyer in top-recommended-lawyers' Attorney unique()):
+        for lawyer in top_recommended_lawyers['Attorney'].unique():
             st.write(f"**{lawyer}'s Matters:**")
-            lawyer matters = matters data matters data Attorney == lawyer][['Practice Area', 'Matter Description']]
-            st.write(lawyer matters to_html(index=False), unsafe_allow_html=True)
+            lawyer_matters = matters_data[matters_data['Attorney'] == lawyer][['Practice Area', 'Matter Description']]
+            st.write(lawyer_matters.to_html(index=False), unsafe_allow_html=True)
 
     except Exception as e:
         st.error(f"Error querying Claude: {e}")
@@ -163,7 +163,7 @@ if user_input:
 
     if not matters_data.empty:
         # Ensure the correct column names are used
-        matters_index, matters_vectorizer = create_vector_db(matters_data, ['Attorney', 'Matter Description'])  # Adjusted columns
+        matters_index, matters_vectorizer = create_vector_db(matters_data, ['Attorney', 'Matter Description'])
 
         if matters_index is not None:
             query_claude_with_data(user_input, matters_data, matters_index, matters_vectorizer)
