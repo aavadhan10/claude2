@@ -33,15 +33,15 @@ def create_weighted_vector_db(data):
         'Area of Expertise': 1.5,
         'Matter Description': 1.0
     }
-    
+
     def weighted_text(row):
         return ' '.join([
             ' '.join([str(row[col])] * int(weight * 10))
             for col, weight in weights.items() if col in row.index
         ])
-    
+
     combined_text = data.apply(weighted_text, axis=1)
-    
+
     vectorizer = TfidfVectorizer(stop_words='english', max_features=5000)
     X = vectorizer.fit_transform(combined_text)
     X = normalize(X)
@@ -54,10 +54,10 @@ def call_claude(messages):
         system_message = messages[0]['content'] if messages[0]['role'] == 'system' else ""
         user_message = next(msg['content'] for msg in messages if msg['role'] == 'user')
         prompt = f"{system_message}\n\n{HUMAN_PROMPT} {user_message}{AI_PROMPT}"
-        
+
         response = client.completions.create(
             model="claude-2.1",
-            max_tokens_to_sample=500,
+            max_tokens_to_sample=1000,  # Increased to allow for longer responses
             temperature=0.7,
             prompt=prompt
         )
@@ -66,46 +66,18 @@ def call_claude(messages):
         st.error(f"Error calling Claude: {e}")
         return None
 
-def query_claude_with_data(question, matters_data, matters_index, matters_vectorizer):
-    question_vec = matters_vectorizer.transform([question])
-    D, I = matters_index.search(normalize(question_vec).toarray(), k=5)
-    
-    relevant_data = matters_data.iloc[I[0]]
-    
-    primary_info = relevant_data[['Attorney', 'Role Detail', 'Practice Group', 'Summary', 'Area of Expertise']].drop_duplicates(subset=['Attorney'])
-    secondary_info = relevant_data[['Attorney', 'Matter Description']].drop_duplicates(subset=['Attorney'])
-    
-    primary_context = primary_info.to_string(index=False)
-    secondary_context = secondary_info.to_string(index=False)
-    
-    messages = [
-        {"role": "system", "content": "You are an expert legal consultant tasked with recommending the best lawyer based on the given information. You must always recommend at least one specific lawyer, even if the match isn't perfect. First, analyze the primary information about the lawyers. Then, consider the secondary information about their matters to refine your recommendation."},
-        {"role": "user", "content": f"Question: {question}\n\nPrimary Lawyer Information:\n{primary_context}\n\nBased on this primary information, who are the top candidates and why?\n\nNow, consider this additional information about their matters:\n{secondary_context}\n\nGiven all this information, provide your final recommendation for the most suitable lawyer(s) and explain your reasoning in detail. Remember, you must recommend at least one specific lawyer by name, even if they're not a perfect match for the query."}
-    ]
-    
-    claude_response = call_claude(messages)
-    if not claude_response:
-        return
-    
-    st.write("### Claude's Recommendation:")
-    st.write(claude_response)
-    
-    st.write("### Recommended Lawyer(s) Information:")
-    recommended_lawyers = primary_info['Attorney'].tolist()
-    st.write(primary_info[primary_info['Attorney'].isin(recommended_lawyers)].to_html(index=False), unsafe_allow_html=True)
-    
-    st.write("### Related Matters of Recommended Lawyer(s):")
-    st.write(secondary_info[secondary_info['Attorney'].isin(recommended_lawyers)].to_html(index=False), unsafe_allow_html=True)
+# Insert the updated query_claude_with_data function here
 
 # Streamlit app layout
-st.title("Rolodex AI: Find Your Ideal Lawyer 👨‍⚖️ Utilizing Claude 2.1")
+st.title("Rolodex AI: Find Your Ideal Lawyers 👨‍⚖️ Utilizing Claude 2.1")
 st.write("Ask questions about the top lawyers for specific legal needs:")
 
 default_questions = {
+    "Who are the top lawyers for corporate law?": "corporate law",
     "Which attorneys have the most experience with intellectual property?": "intellectual property",
-    "Can you recommend a lawyer specializing in employment law?": "employment law",
+    "Can you recommend lawyers specializing in employment law?": "employment law",
     "Who are the best litigators for financial cases?": "financial law",
-    "Which lawyer should I contact for real estate matters?": "real estate"
+    "Which lawyers should I contact for real estate matters?": "real estate"
 }
 
 user_input = st.text_input("Type your question:", placeholder="e.g., 'Who are the top lawyers for corporate law?'")
