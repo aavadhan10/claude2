@@ -138,6 +138,3 @@ if st.button("Submit Feedback"):
         st.write(f"Thank you for your feedback: '{custom_feedback}'")
     else:
         st.error("Please provide feedback before submitting.")
-        st.write(f"Thank you for your feedback: '{custom_feedback}'")
-    else:
-        st.error("Please provide feedback before submitting.")
