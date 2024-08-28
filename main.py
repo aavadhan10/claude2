@@ -48,12 +48,13 @@ def call_claude(messages):
 
         prompt = f"{HUMAN_PROMPT} {user_message}{ASSISTANT_PROMPT}"
 
-        # Use the correct method for generating a completion
+        # Use the correct method for generating a completion with the required header
         response = client.completion(
             prompt=prompt,
             model="claude-3.5",
             max_tokens_to_sample=150,
             temperature=0.9,
+            anthropic_version="2023-01-01"  # Example date; replace with the correct version date
         )
 
         st.write("Received response from Claude 3.5 Sonnet")
