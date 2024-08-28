@@ -57,7 +57,7 @@ def call_claude(messages):
 
         response = client.completions.create(
             model="claude-2.1",
-            max_tokens_to_sample=1000,  # Increased to allow for longer responses
+            max_tokens_to_sample=1000,
             temperature=0.7,
             prompt=prompt
         )
@@ -66,7 +66,40 @@ def call_claude(messages):
         st.error(f"Error calling Claude: {e}")
         return None
 
-# Insert the updated query_claude_with_data function here
+def query_claude_with_data(question, matters_data, matters_index, matters_vectorizer):
+    question_vec = matters_vectorizer.transform([question])
+    D, I = matters_index.search(normalize(question_vec).toarray(), k=10)
+
+    relevant_data = matters_data.iloc[I[0]]
+
+    primary_info = relevant_data[['Attorney', 'Role Detail', 'Practice Group', 'Summary', 'Area of Expertise']].drop_duplicates(subset=['Attorney'])
+    secondary_info = relevant_data[['Attorney', 'Matter Description']].drop_duplicates(subset=['Attorney'])
+
+    # Combine primary and secondary info for each lawyer
+    combined_info = []
+    for _, lawyer in primary_info.iterrows():
+        lawyer_matters = secondary_info[secondary_info['Attorney'] == lawyer['Attorney']]['Matter Description'].tolist()
+        combined_info.append(f"Lawyer: {lawyer['Attorney']}\nRole: {lawyer['Role Detail']}\nPractice Group: {lawyer['Practice Group']}\nSummary: {lawyer['Summary']}\nArea of Expertise: {lawyer['Area of Expertise']}\nMatter Descriptions: {'; '.join(lawyer_matters)}\n\n")
+    
+    combined_context = "\n".join(combined_info)
+
+    messages = [
+        {"role": "system", "content": "You are an expert legal consultant tasked with recommending the best lawyers based on the given information. Analyze the information about multiple lawyers, including their expertise, practice areas, and matter descriptions. Provide a ranked list of the top 5 most suitable lawyers for the given query, explaining your reasoning for each recommendation."},
+        {"role": "user", "content": f"Question: {question}\n\nLawyer Information:\n{combined_context}\n\nBased on this information, who are the top 5 most suitable lawyers for this query? Provide a ranked list with brief explanations for each recommendation."}
+    ]
+
+    claude_response = call_claude(messages)
+    if not claude_response:
+        return
+
+    st.write("### Claude's Recommendations:")
+    st.write(claude_response)
+
+    st.write("### All Relevant Lawyers' Information:")
+    st.write(primary_info.to_html(index=False), unsafe_allow_html=True)
+
+    st.write("### Related Matters of Relevant Lawyers:")
+    st.write(secondary_info.to_html(index=False), unsafe_allow_html=True)
 
 # Streamlit app layout
 st.title("Rolodex AI: Find Your Ideal Lawyers 👨‍⚖️ Utilizing Claude 2.1")
