@@ -8,7 +8,7 @@ import time
 
 # Initialize Claude API using environment variable
 claude_api_key = st.secrets["claude"]["CLAUDE_API_KEY"]
-client = anthropic.Client(api_key=claude_api_key)
+client = anthropic.Anthropic(api_key=claude_api_key)
 
 # Load and clean CSV data with specified encoding
 @st.cache_data
@@ -42,21 +42,19 @@ def call_claude(messages):
         system_message = messages[0]['content'] if messages[0]['role'] == 'system' else ""
         user_message = next(msg['content'] for msg in messages if msg['role'] == 'user')
 
-        # Ensure the prompt starts with anthropic.HUMAN_PROMPT and ends with anthropic.AI_PROMPT
-        prompt = f"{anthropic.HUMAN_PROMPT} {user_message}{anthropic.AI_PROMPT}"
-
-        # Call the Claude model directly
-        response = client.completion(
-            prompt=prompt,
+        # Call the Claude model using the new API structure
+        response = client.messages.create(
             model="claude-3.5-sonnet",
-            max_tokens_to_sample=150,
+            max_tokens=150,
             temperature=0.9,
-            stop_sequences=[anthropic.HUMAN_PROMPT],
-            anthropic_version="2023-06-01"  # Added this line
+            messages=[
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": user_message}
+            ]
         )
 
         st.write("Received response from Claude 3.5 Sonnet")
-        return response['completion'].strip()
+        return response.content[0].text
 
     except Exception as e:
         st.error(f"An unexpected error occurred: {e}")
