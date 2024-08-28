@@ -48,10 +48,11 @@ def call_claude(messages):
         # Call the Claude model directly
         response = client.completion(
             prompt=prompt,
-            model="claude-3.5-sonnet",  # Specify the correct model name
+            model="claude-3.5-sonnet",
             max_tokens_to_sample=150,
             temperature=0.9,
-            stop_sequences=[anthropic.HUMAN_PROMPT]  # Stop when it reaches the next Human prompt
+            stop_sequences=[anthropic.HUMAN_PROMPT],
+            anthropic_version="2023-06-01"  # Added this line
         )
 
         st.write("Received response from Claude 3.5 Sonnet")
