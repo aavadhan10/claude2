@@ -4,12 +4,9 @@ import numpy as np
 import faiss
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import normalize
+from anthropic import Anthropic
 import re
 import unicodedata
-import requests
-
-# Enable detailed error logging
-st.set_option('client.showErrorDetails', True)
 
 @st.cache_resource
 def init_anthropic_client():
@@ -17,9 +14,9 @@ def init_anthropic_client():
     if not claude_api_key:
         st.error("Anthropic API key not found. Please check your Streamlit secrets configuration.")
         st.stop()
-    return claude_api_key
+    return Anthropic(api_key=claude_api_key)
 
-claude_api_key = init_anthropic_client()
+client = init_anthropic_client()
 
 @st.cache_data
 def load_and_clean_data(file_path, encoding='utf-8'):
@@ -78,39 +75,31 @@ def create_weighted_vector_db(data):
     X = vectorizer.fit_transform(combined_text)
     X = normalize(X)
     index = faiss.IndexFlatL2(X.shape[1])
-    index.add(X.toarray().astype('float32'))
+    index.add(X.toarray())
     return index, vectorizer
 
 def call_claude(messages):
     try:
         system_message = messages[0]['content'] if messages[0]['role'] == 'system' else ""
         user_message = next(msg['content'] for msg in messages if msg['role'] == 'user')
-        prompt = f"{system_message}\n\nHuman: {user_message}\n\nAssistant:"
-
-        response = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "Content-Type": "application/json",
-                "X-API-Key": claude_api_key
-            },
-            json={
-                "model": "claude-3-sonnet-20240229",
-                "messages": [
-                    {"role": "user", "content": prompt}
-                ],
-                "max_tokens": 500,
-                "temperature": 0.7
-            }
+        
+        response = client.messages.create(
+            model="claude-3-sonnet-20240229",
+            max_tokens=500,
+            temperature=0.7,
+            system=system_message,
+            messages=[
+                {"role": "user", "content": user_message}
+            ]
         )
-        response.raise_for_status()
-        return response.json()['content'][0]['text']
+        return response.content[0].text
     except Exception as e:
         st.error(f"Error calling Claude: {e}")
         return None
 
 def query_claude_with_data(question, matters_data, matters_index, matters_vectorizer):
     question_vec = matters_vectorizer.transform([question])
-    D, I = matters_index.search(normalize(question_vec).toarray().astype('float32'), k=30)  # Increased k to 30
+    D, I = matters_index.search(normalize(question_vec).toarray(), k=30)  # Increased k to 30
 
     relevant_data = matters_data.iloc[I[0]]
 
