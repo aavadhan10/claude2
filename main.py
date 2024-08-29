@@ -4,7 +4,7 @@ import numpy as np
 import faiss
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import normalize
-from anthropic import Anthropic
+from anthropic import Anthropic, HUMAN_PROMPT, AI_PROMPT
 import re
 import unicodedata
 
@@ -82,17 +82,15 @@ def call_claude(messages):
     try:
         system_message = messages[0]['content'] if messages[0]['role'] == 'system' else ""
         user_message = next(msg['content'] for msg in messages if msg['role'] == 'user')
-        
-        response = client.messages.create(
-            model="claude-3-sonnet-20240229",
-            max_tokens=500,
+        prompt = f"{system_message}\n\n{HUMAN_PROMPT} {user_message}{AI_PROMPT}"
+
+        response = client.completions.create(
+            model="claude-2.1",
+            max_tokens_to_sample=500,
             temperature=0.7,
-            system=system_message,
-            messages=[
-                {"role": "user", "content": user_message}
-            ]
+            prompt=prompt
         )
-        return response.content[0].text
+        return response.completion
     except Exception as e:
         st.error(f"Error calling Claude: {e}")
         return None
@@ -149,7 +147,7 @@ def query_claude_with_data(question, matters_data, matters_index, matters_vector
     st.write(secondary_info.to_html(index=False), unsafe_allow_html=True)
 
 # Streamlit app layout
-st.title("Rolodex AI: Find Your Ideal Lawyer 👨‍⚖️ Utilizing Claude 3.5 Sonnet")
+st.title("Rolodex AI: Find Your Ideal Lawyer 👨‍⚖️ Utilizing Claude 2.1")
 st.write("Ask questions about the top lawyers for specific legal needs:")
 
 default_questions = {
