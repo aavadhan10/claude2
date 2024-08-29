@@ -7,26 +7,16 @@ from sklearn.preprocessing import normalize
 from anthropic import Anthropic
 import re
 import unicodedata
-import os
 
-# Initialize Anthropic client
 def init_anthropic_client():
-    # Try to get the API key from Streamlit secrets first
-    claude_api_key = st.secrets.get("claude", {}).get("CLAUDE_API_KEY")
-    
-    # If not found in secrets, try to get it from environment variables
+    claude_api_key = st.secrets["claude"]["CLAUDE_API_KEY"]
     if not claude_api_key:
-        claude_api_key = os.environ.get("CLAUDE_API_KEY")
-    
-    if not claude_api_key:
-        st.error("Anthropic API key not found. Please set it in Streamlit secrets or as an environment variable.")
+        st.error("Anthropic API key not found. Please check your Streamlit secrets configuration.")
         st.stop()
-    
     return Anthropic(api_key=claude_api_key)
 
 client = init_anthropic_client()
 
-@st.cache_data
 def load_and_clean_data(file_path, encoding='utf-8'):
     try:
         data = pd.read_csv(file_path, encoding=encoding)
