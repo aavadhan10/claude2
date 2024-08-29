@@ -9,7 +9,7 @@ import re
 import unicodedata
 
 def init_anthropic_client():
-    claude_api_key = st.secrets["claude"]["CLAUDE_API_KEY"]
+    claude_api_key = st.secrets["CLAUDE_API_KEY"]
     if not claude_api_key:
         st.error("Anthropic API key not found. Please check your Streamlit secrets configuration.")
         st.stop()
