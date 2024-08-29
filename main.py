@@ -96,7 +96,7 @@ def call_claude(messages):
 
 def query_claude_with_data(question, matters_data, matters_index, matters_vectorizer):
     question_vec = matters_vectorizer.transform([question])
-    D, I = matters_index.search(normalize(question_vec).toarray(), k=30)  # Increased k to 30
+    D, I = matters_index.search(normalize(question_vec).toarray(), k=5)  # Increased k to 30
 
     relevant_data = matters_data.iloc[I[0]]
 
