@@ -146,8 +146,8 @@ def query_claude_with_data(question, matters_data, matters_index, matters_vector
     st.write(secondary_info.to_html(index=False), unsafe_allow_html=True)
 
 # Streamlit app layout
-st.title("Rolodex AI: Find Your Ideal Lawyer 👨‍⚖️ Utilizing Claude 3.5")
-st.write("Ask questions about the top lawyers for specific legal needs:")
+st.title("Rolodex AI: Find Your Legal Match 👨‍⚖️ Utilizing Claude 3.5")
+st.write("Ask questions about the skill-matched lawyers for your specific legal needs:")
 
 default_questions = {
     "Which attorneys have the most experience with intellectual property?": "intellectual property",
