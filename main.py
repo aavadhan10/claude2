@@ -6,8 +6,10 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import normalize
 import re
 import unicodedata
-from anthropic import Anthropic, HUMAN_PROMPT, AI_PROMPT
+import httpx
 
+# Remove the direct import of Anthropic, HUMAN_PROMPT, and AI_PROMPT
+# We'll use httpx to make API calls instead
 
 @st.cache_resource
 def init_anthropic_client():
@@ -15,7 +17,7 @@ def init_anthropic_client():
     if not claude_api_key:
         st.error("Anthropic API key not found. Please check your Streamlit secrets configuration.")
         st.stop()
-    return Anthropic(api_key=claude_api_key)
+    return httpx.Client(headers={"X-API-Key": claude_api_key})
 
 client = init_anthropic_client()
 
@@ -74,24 +76,29 @@ def create_weighted_vector_db(data):
 
     vectorizer = TfidfVectorizer(stop_words='english', max_features=5000)
     X = vectorizer.fit_transform(combined_text)
-    X = normalize(X)
-    index = faiss.IndexFlatL2(X.shape[1])
-    index.add(X.toarray())
+    X_normalized = normalize(X, norm='l2', axis=1, copy=False)
+    
+    index = faiss.IndexFlatIP(X.shape[1])
+    index.add(np.ascontiguousarray(X_normalized.toarray()))
     return index, vectorizer
 
 def call_claude(messages):
     try:
         system_message = messages[0]['content'] if messages[0]['role'] == 'system' else ""
         user_message = next(msg['content'] for msg in messages if msg['role'] == 'user')
-        prompt = f"{system_message}\n\n{HUMAN_PROMPT} {user_message}{AI_PROMPT}"
+        prompt = f"{system_message}\n\nHuman: {user_message}\n\nAssistant:"
 
-        response = client.completions.create(
-            model="claude-2.1",
-            max_tokens_to_sample=500,
-            temperature=0.7,
-            prompt=prompt
+        response = client.post(
+            "https://api.anthropic.com/v1/complete",
+            json={
+                "model": "claude-2.1",
+                "prompt": prompt,
+                "max_tokens_to_sample": 500,
+                "temperature": 0.7
+            }
         )
-        return response.completion
+        response.raise_for_status()
+        return response.json()['completion']
     except Exception as e:
         st.error(f"Error calling Claude: {e}")
         return None
@@ -166,12 +173,18 @@ for question, _ in default_questions.items():
         break
 
 if user_input:
+    progress_bar = st.progress(0)
+    progress_bar.progress(10)
     matters_data = load_and_clean_data('Cleaned_Matters_Data.csv')
     if not matters_data.empty:
+        progress_bar.progress(50)
         matters_index, matters_vectorizer = create_weighted_vector_db(matters_data)
+        progress_bar.progress(90)
         query_claude_with_data(user_input, matters_data, matters_index, matters_vectorizer)
+        progress_bar.progress(100)
     else:
         st.error("Failed to load data.")
+    progress_bar.empty()
 
 # Feedback section
 st.write("### How accurate was this result?")
