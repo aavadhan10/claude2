@@ -1,55 +1,38 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import faiss
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.preprocessing import normalize
-from anthropic import Anthropic
+from sklearn.metrics.pairwise import cosine_similarity
+import requests
 import re
 import unicodedata
 
-# Initialize Anthropic client
+@st.cache_resource
 def init_anthropic_client():
-    claude_api_key = st.secrets["claude"]["CLAUDE_API_KEY"]
-    if not claude_api_key:
-        st.error("Anthropic API key not found. Please check your Streamlit secrets configuration.")
-        st.stop()
-    return Anthropic(api_key=claude_api_key)
+    return st.secrets["claude"]["CLAUDE_API_KEY"]
 
-client = init_anthropic_client()
+api_key = init_anthropic_client()
 
 @st.cache_data
 def load_and_clean_data(file_path, encoding='utf-8'):
     try:
         data = pd.read_csv(file_path, encoding=encoding)
     except UnicodeDecodeError:
-        # If UTF-8 fails, try latin-1
         data = pd.read_csv(file_path, encoding='latin-1')
 
     def clean_text(text):
         if isinstance(text, str):
-            # Remove non-printable characters
             text = ''.join(char for char in text if char.isprintable())
-            # Normalize unicode characters
             text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('ascii')
-            # Replace specific problematic sequences
             text = text.replace('Ã¢ÂÂ', "'").replace('Ã¢ÂÂ¨', ", ")
-            # Remove any remaining unicode escape sequences
             text = re.sub(r'\\u[0-9a-fA-F]{4}', '', text)
-            # Replace multiple spaces with a single space
             text = re.sub(r'\s+', ' ', text).strip()
         return text
 
-    # Clean column names
     data.columns = data.columns.str.replace('ï»¿', '').str.replace('Ã', '').str.strip()
-
-    # Clean text in all columns
     for col in data.columns:
         data[col] = data[col].apply(clean_text)
-
-    # Remove unnamed columns
     data = data.loc[:, ~data.columns.str.contains('^Unnamed')]
-
     return data
 
 @st.cache_resource
@@ -70,58 +53,40 @@ def create_weighted_vector_db(data):
         ])
 
     combined_text = data.apply(weighted_text, axis=1)
-
     vectorizer = TfidfVectorizer(stop_words='english', max_features=5000)
     X = vectorizer.fit_transform(combined_text)
-    X_normalized = normalize(X, norm='l2', axis=1, copy=False)
-    
-    index = faiss.IndexFlatIP(X.shape[1])
-    index.add(np.ascontiguousarray(X_normalized.toarray()))
-    return index, vectorizer
+    return X, vectorizer
 
 def call_claude(messages):
     try:
-        system_message = messages[0]['content'] if messages[0]['role'] == 'system' else ""
-        user_message = next(msg['content'] for msg in messages if msg['role'] == 'user')
-        prompt = f"{system_message}\n\nHuman: {user_message}\n\nAssistant:"
-
-        response = client.completions.create(
-            model="claude-2.1",
-            prompt=prompt,
-            max_tokens_to_sample=500,
-            temperature=0.7
-        )
-        return response.completion
+        headers = {
+            "Content-Type": "application/json",
+            "X-API-Key": api_key,
+        }
+        data = {
+            "model": "claude-2.1",
+            "prompt": messages,
+            "max_tokens_to_sample": 500,
+            "temperature": 0.7
+        }
+        response = requests.post("https://api.anthropic.com/v1/complete", headers=headers, json=data)
+        response.raise_for_status()
+        return response.json()['completion']
     except Exception as e:
         st.error(f"Error calling Claude: {e}")
         return None
 
-def query_claude_with_data(question, matters_data, matters_index, matters_vectorizer):
-    question_vec = matters_vectorizer.transform([question])
-    D, I = matters_index.search(normalize(question_vec).toarray(), k=30)  # Increased k to 30
+def query_claude_with_data(question, matters_data, X, vectorizer):
+    question_vec = vectorizer.transform([question])
+    similarities = cosine_similarity(question_vec, X).flatten()
+    top_indices = similarities.argsort()[-30:][::-1]
 
-    relevant_data = matters_data.iloc[I[0]]
-
-    # Calculate relevance scores
-    relevance_scores = 1 / (1 + D[0])
-    relevant_data['relevance_score'] = relevance_scores
-
-    # Sort by relevance score
+    relevant_data = matters_data.iloc[top_indices]
+    relevant_data['relevance_score'] = similarities[top_indices]
     relevant_data = relevant_data.sort_values('relevance_score', ascending=False)
 
-    # Get unique lawyers
-    unique_lawyers = relevant_data['Attorney'].unique()
-
-    # Ensure we have at least 3 unique lawyers (if available)
-    if len(unique_lawyers) < 3:
-        additional_lawyers = matters_data[~matters_data['Attorney'].isin(unique_lawyers)].sample(min(3 - len(unique_lawyers), len(matters_data) - len(unique_lawyers)))
-        relevant_data = pd.concat([relevant_data, additional_lawyers])
-
-    # Get top 3 unique lawyers
     top_lawyers = relevant_data['Attorney'].unique()[:3]
-
-    # Get all matters for top 3 lawyers, sorted by relevance
-    top_relevant_data = relevant_data[relevant_data['Attorney'].isin(top_lawyers)].sort_values('relevance_score', ascending=False)
+    top_relevant_data = relevant_data[relevant_data['Attorney'].isin(top_lawyers)]
 
     primary_info = top_relevant_data[['Attorney', 'Work Email', 'Role Detail', 'Practice Group', 'Summary', 'Area of Expertise']].drop_duplicates(subset=['Attorney'])
     secondary_info = top_relevant_data[['Attorney', 'Matter Description', 'relevance_score']]
@@ -129,10 +94,17 @@ def query_claude_with_data(question, matters_data, matters_index, matters_vector
     primary_context = primary_info.to_string(index=False)
     secondary_context = secondary_info.to_string(index=False)
 
-    messages = [
-        {"role": "system", "content": "You are an expert legal consultant tasked with recommending the best lawyers based on the given information. Analyze the primary information about the lawyers and consider the secondary information about their matters to refine your recommendation. Pay attention to the relevance scores provided."},
-        {"role": "user", "content": f"Question: {question}\n\nTop Lawyers Information:\n{primary_context}\n\nRelated Matters (including relevance scores):\n{secondary_context}\n\nBased on all this information, provide your final recommendation for the most suitable lawyer(s) and explain your reasoning in detail. Consider the relevance scores when making your recommendation. Recommend up to 3 lawyers, discussing their relevant experience and matters they've worked on. If fewer than 3 lawyers are relevant, only recommend those who are truly suitable."}
-    ]
+    messages = f"""You are an expert legal consultant tasked with recommending the best lawyers based on the given information. Analyze the primary information about the lawyers and consider the secondary information about their matters to refine your recommendation. Pay attention to the relevance scores provided.
+
+Question: {question}
+
+Top Lawyers Information:
+{primary_context}
+
+Related Matters (including relevance scores):
+{secondary_context}
+
+Based on all this information, provide your final recommendation for the most suitable lawyer(s) and explain your reasoning in detail. Consider the relevance scores when making your recommendation. Recommend up to 3 lawyers, discussing their relevant experience and matters they've worked on. If fewer than 3 lawyers are relevant, only recommend those who are truly suitable."""
 
     claude_response = call_claude(messages)
     if not claude_response:
@@ -171,9 +143,9 @@ if user_input:
     matters_data = load_and_clean_data('Cleaned_Matters_Data.csv')
     if not matters_data.empty:
         progress_bar.progress(50)
-        matters_index, matters_vectorizer = create_weighted_vector_db(matters_data)
+        X, vectorizer = create_weighted_vector_db(matters_data)
         progress_bar.progress(90)
-        query_claude_with_data(user_input, matters_data, matters_index, matters_vectorizer)
+        query_claude_with_data(user_input, matters_data, X, vectorizer)
         progress_bar.progress(100)
     else:
         st.error("Failed to load data.")
