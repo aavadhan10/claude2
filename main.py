@@ -4,9 +4,10 @@ import numpy as np
 import faiss
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import normalize
-from anthropic import Anthropic, HUMAN_PROMPT, AI_PROMPT
 import re
 import unicodedata
+from anthropic import Anthropic, HUMAN_PROMPT, AI_PROMPT
+
 
 @st.cache_resource
 def init_anthropic_client():
