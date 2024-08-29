@@ -4,20 +4,17 @@ import numpy as np
 import faiss
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import normalize
+from anthropic import Anthropic
 import re
 import unicodedata
-import httpx
 
-# Remove the direct import of Anthropic, HUMAN_PROMPT, and AI_PROMPT
-# We'll use httpx to make API calls instead
-
-@st.cache_resource
+# Initialize Anthropic client
 def init_anthropic_client():
     claude_api_key = st.secrets["claude"]["CLAUDE_API_KEY"]
     if not claude_api_key:
         st.error("Anthropic API key not found. Please check your Streamlit secrets configuration.")
         st.stop()
-    return httpx.Client(headers={"X-API-Key": claude_api_key})
+    return Anthropic(api_key=claude_api_key)
 
 client = init_anthropic_client()
 
@@ -88,17 +85,13 @@ def call_claude(messages):
         user_message = next(msg['content'] for msg in messages if msg['role'] == 'user')
         prompt = f"{system_message}\n\nHuman: {user_message}\n\nAssistant:"
 
-        response = client.post(
-            "https://api.anthropic.com/v1/complete",
-            json={
-                "model": "claude-2.1",
-                "prompt": prompt,
-                "max_tokens_to_sample": 500,
-                "temperature": 0.7
-            }
+        response = client.completions.create(
+            model="claude-2.1",
+            prompt=prompt,
+            max_tokens_to_sample=500,
+            temperature=0.7
         )
-        response.raise_for_status()
-        return response.json()['completion']
+        return response.completion
     except Exception as e:
         st.error(f"Error calling Claude: {e}")
         return None
