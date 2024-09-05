@@ -94,60 +94,8 @@ def call_claude(messages):
         st.error(f"Error calling Claude: {e}")
         return None
 
-def standardize_prompt(user_input):
-    # List of keywords to look for
-    keywords = ['experience', 'knowledge', 'expertise', 'specialization', 'background']
-    
-    # Check if any keyword is in the user input
-    if any(keyword in user_input.lower() for keyword in keywords):
-        # If found, use a standard format
-        standardized_prompt = f"Please recommend lawyers with relevant expertise in {user_input}. Consider their experience, knowledge, and specialization in this area."
-    else:
-        # If no keyword is found, use a more general format
-        standardized_prompt = f"Please recommend lawyers who are best suited for matters related to {user_input}. Consider their relevant experience and expertise."
-    
-    return standardized_prompt
-
-def post_process_claude_response(response):
-    # Split the response into sections for each lawyer
-    lawyer_sections = re.split(r'\d+\.', response)[1:]  # Skip the first empty split
-    
-    structured_response = []
-    for section in lawyer_sections:
-        lawyer_info = {}
-        
-        # Extract name
-        name_match = re.search(r'([A-Z][a-z]+ [A-Z][a-z]+)', section)
-        if name_match:
-            lawyer_info['name'] = name_match.group(1)
-        
-        # Extract role
-        role_match = re.search(r'Role: (.+)', section)
-        if role_match:
-            lawyer_info['role'] = role_match.group(1)
-        
-        # Extract expertise
-        expertise_match = re.search(r'Expertise: (.+)', section)
-        if expertise_match:
-            lawyer_info['expertise'] = expertise_match.group(1)
-        
-        # Extract relevant matters
-        matters_match = re.search(r'Relevant Matters: (.+)', section, re.DOTALL)
-        if matters_match:
-            lawyer_info['relevant_matters'] = matters_match.group(1).strip()
-        
-        # Extract recommendation reason
-        reason_match = re.search(r'Recommendation: (.+)', section, re.DOTALL)
-        if reason_match:
-            lawyer_info['recommendation_reason'] = reason_match.group(1).strip()
-        
-        structured_response.append(lawyer_info)
-    
-    return structured_response
-
 def query_claude_with_data(question, matters_data, matters_index, matters_vectorizer):
-    standardized_question = standardize_prompt(question)
-    question_vec = matters_vectorizer.transform([standardized_question])
+    question_vec = matters_vectorizer.transform([question])
     D, I = matters_index.search(normalize(question_vec).toarray(), k=5)  # Increased k to 30
 
     relevant_data = matters_data.iloc[I[0]]
@@ -180,34 +128,30 @@ def query_claude_with_data(question, matters_data, matters_index, matters_vector
     secondary_context = secondary_info.to_string(index=False)
 
     messages = [
-        {"role": "system", "content": """You are an expert legal consultant tasked with recommending the best lawyers based on the given information. Follow these guidelines:
+        {"role": "system", "content": """You are an expert legal consultant tasked with recommending the best lawyers based on the given information. Follow these guidelines strictly:
         1. Analyze the primary information about the lawyers and consider the secondary information about their matters.
         2. Pay close attention to the relevance scores provided.
         3. Recommend up to 3 lawyers, discussing their relevant experience and matters they've worked on.
         4. If fewer than 3 lawyers are relevant, only recommend those who are truly suitable.
-        5. For each recommended lawyer, provide:
-           - Their name and role
-           - A brief summary of their expertise
-           - Examples of relevant matters they've worked on
-           - An explanation of why they're a good fit for the query
+        5. For each recommended lawyer, provide your response in the following format:
+
+        [Lawyer Name] - [Role]
+        Expertise: [Brief summary of their expertise]
+        Relevant Matters: [Examples of relevant matters they've worked on]
+        Recommendation: [Explanation of why they're a good fit for the query]
+
         6. Be consistent in your response format, regardless of how the question is phrased.
-        7. Focus on factual information and avoid subjective judgments."""},
-        {"role": "user", "content": f"Question: {standardized_question}\n\nTop Lawyers Information:\n{primary_context}\n\nRelated Matters (including relevance scores):\n{secondary_context}\n\nBased on all this information, provide your final recommendation for the most suitable lawyer(s) and explain your reasoning in detail. Consider the relevance scores when making your recommendation."}
+        7. Focus on factual information and avoid subjective judgments.
+        8. Do not include any additional commentary or text outside of the specified format."""},
+        {"role": "user", "content": f"Question: {question}\n\nTop Lawyers Information:\n{primary_context}\n\nRelated Matters (including relevance scores):\n{secondary_context}\n\nBased on all this information, provide your final recommendation for the most suitable lawyer(s) and explain your reasoning in detail. Consider the relevance scores when making your recommendation. Strictly follow the format specified in the system message."}
     ]
 
     claude_response = call_claude(messages)
     if not claude_response:
         return
 
-    structured_output = post_process_claude_response(claude_response)
-
     st.write("### Claude's Recommendation:")
-    for lawyer in structured_output:
-        st.write(f"**{lawyer.get('name', 'Unknown')} - {lawyer.get('role', 'Unknown Role')}**")
-        st.write(f"Expertise: {lawyer.get('expertise', 'Not specified')}")
-        st.write(f"Relevant Matters: {lawyer.get('relevant_matters', 'Not specified')}")
-        st.write(f"Recommendation: {lawyer.get('recommendation_reason', 'Not specified')}")
-        st.write("---")
+    st.write(claude_response)
 
     st.write("### Top Recommended Lawyer(s) Information:")
     st.write(primary_info.to_html(index=False), unsafe_allow_html=True)
