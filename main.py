@@ -128,22 +128,8 @@ def query_claude_with_data(question, matters_data, matters_index, matters_vector
     secondary_context = secondary_info.to_string(index=False)
 
     messages = [
-        {"role": "system", "content": """You are an expert legal consultant tasked with recommending the best lawyers based on the given information. Follow these guidelines strictly:
-        1. Analyze the primary information about the lawyers and consider the secondary information about their matters.
-        2. Pay close attention to the relevance scores provided.
-        3. Recommend up to 3 lawyers, discussing their relevant experience and matters they've worked on.
-        4. If fewer than 3 lawyers are relevant, only recommend those who are truly suitable.
-        5. For each recommended lawyer, provide your response in the following format:
-
-        [Lawyer Name] - [Role]
-        Expertise: [Brief summary of their expertise]
-        Relevant Matters: [Examples of relevant matters they've worked on]
-        Recommendation: [Explanation of why they're a good fit for the query]
-
-        6. Be consistent in your response format, regardless of how the question is phrased.
-        7. Focus on factual information and avoid subjective judgments.
-        8. Do not include any additional commentary or text outside of the specified format."""},
-        {"role": "user", "content": f"Question: {question}\n\nTop Lawyers Information:\n{primary_context}\n\nRelated Matters (including relevance scores):\n{secondary_context}\n\nBased on all this information, provide your final recommendation for the most suitable lawyer(s) and explain your reasoning in detail. Consider the relevance scores when making your recommendation. Strictly follow the format specified in the system message."}
+        {"role": "system", "content": "You are an expert legal consultant tasked with recommending the best lawyers based on the given information. Analyze the primary information about the lawyers and consider the secondary information about their matters to refine your recommendation. Pay attention to the relevance scores provided."},
+        {"role": "user", "content": f"Question: {question}\n\nTop Lawyers Information:\n{primary_context}\n\nRelated Matters (including relevance scores):\n{secondary_context}\n\nBased on all this information, provide your final recommendation for the most suitable lawyer(s) and explain your reasoning in detail. Consider the relevance scores when making your recommendation. Recommend up to 3 lawyers, discussing their relevant experience and matters they've worked on. If fewer than 3 lawyers are relevant, only recommend those who are truly suitable."}
     ]
 
     claude_response = call_claude(messages)
