@@ -7,6 +7,12 @@ from sklearn.preprocessing import normalize
 from anthropic import Anthropic
 import re
 import unicodedata
+from nltk.corpus import wordnet
+import nltk
+
+# Download required NLTK data
+nltk.download('wordnet', quiet=True)
+nltk.download('averaged_perceptron_tagger', quiet=True)
 
 def init_anthropic_client():
     claude_api_key = st.secrets["CLAUDE_API_KEY"]
@@ -94,8 +100,34 @@ def call_claude(messages):
         st.error(f"Error calling Claude: {e}")
         return None
 
+def expand_query(query):
+    """
+    Expand the query with synonyms and related words.
+    """
+    expanded_query = []
+    for word, tag in nltk.pos_tag(nltk.word_tokenize(query)):
+        synsets = wordnet.synsets(word)
+        if synsets:
+            synonyms = set()
+            for synset in synsets:
+                synonyms.update(lemma.name().replace('_', ' ') for lemma in synset.lemmas())
+            expanded_query.extend(list(synonyms)[:3])  # Limit to 3 synonyms per word
+        expanded_query.append(word)
+    return ' '.join(expanded_query)
+
+def normalize_query(query):
+    """
+    Normalize the query by removing punctuation and converting to lowercase.
+    """
+    query = re.sub(r'[^\w\s]', '', query)
+    return query.lower()
+
 def query_claude_with_data(question, matters_data, matters_index, matters_vectorizer):
-    question_vec = matters_vectorizer.transform([question])
+    # Normalize and expand the question
+    normalized_question = normalize_query(question)
+    expanded_question = expand_query(normalized_question)
+    
+    question_vec = matters_vectorizer.transform([expanded_question])
     D, I = matters_index.search(normalize(question_vec).toarray(), k=5)  # Increased k to 30
 
     relevant_data = matters_data.iloc[I[0]]
