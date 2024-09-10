@@ -7,6 +7,10 @@ from sklearn.preprocessing import normalize
 from anthropic import Anthropic
 import re
 import unicodedata
+from nltk.stem import PorterStemmer
+
+# Initialize the PorterStemmer
+stemmer = PorterStemmer()
 
 def init_anthropic_client():
     claude_api_key = st.secrets["CLAUDE_API_KEY"]
@@ -50,6 +54,10 @@ def load_and_clean_data(file_path, encoding='utf-8'):
 
     return data
 
+# Stemming tokenizer function
+def stem_tokenizer(text):
+    return [stemmer.stem(word) for word in text.split()]
+
 @st.cache_resource
 def create_weighted_vector_db(data):
     weights = {
@@ -69,7 +77,8 @@ def create_weighted_vector_db(data):
 
     combined_text = data.apply(weighted_text, axis=1)
 
-    vectorizer = TfidfVectorizer(stop_words='english', max_features=5000)
+    # Use the updated vectorizer with stemming
+    vectorizer = TfidfVectorizer(stop_words='english', max_features=5000, tokenizer=stem_tokenizer)
     X = vectorizer.fit_transform(combined_text)
     X_normalized = normalize(X, norm='l2', axis=1, copy=False)
     
@@ -96,7 +105,7 @@ def call_claude(messages):
 
 def query_claude_with_data(question, matters_data, matters_index, matters_vectorizer):
     question_vec = matters_vectorizer.transform([question])
-    D, I = matters_index.search(normalize(question_vec).toarray(), k=5)  # Increased k to 30
+    D, I = matters_index.search(normalize(question_vec).toarray(), k=5)
 
     relevant_data = matters_data.iloc[I[0]]
 
