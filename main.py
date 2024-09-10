@@ -13,6 +13,7 @@ import nltk
 # Download required NLTK data
 nltk.download('wordnet', quiet=True)
 nltk.download('averaged_perceptron_tagger', quiet=True)
+nltk.download('punkt', quiet=True)
 
 def init_anthropic_client():
     claude_api_key = st.secrets["CLAUDE_API_KEY"]
