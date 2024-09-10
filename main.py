@@ -78,7 +78,7 @@ def create_weighted_vector_db(data):
     combined_text = data.apply(weighted_text, axis=1)
 
     # Use the updated vectorizer with stemming
-    vectorizer = TfidfVectorizer(stop_words='english', max_features=5000, tokenizer=stem_tokenizer)
+    vectorizer = TfidfVectorizer(stop_words='english', max_features=2000, tokenizer=stem_tokenizer)
     X = vectorizer.fit_transform(combined_text)
     X_normalized = normalize(X, norm='l2', axis=1, copy=False)
     
