@@ -1,226 +1,119 @@
-import streamlit as st
 import pandas as pd
-import numpy as np
-import faiss
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.preprocessing import normalize
-from anthropic import Anthropic
+import streamlit as st
+from thefuzz import fuzz
 import re
-import unicodedata
-from nltk.corpus import wordnet
-import nltk
 
-# Download required NLTK data
-nltk.download('wordnet', quiet=True)
-nltk.download('averaged_perceptron_tagger', quiet=True)
-nltk.download('punkt', quiet=True)
+# File path to the CSV from GitHub
+file_path = 'https://raw.githubusercontent.com/aavadhan10/Conflict-Checks/main/combined_contact_and_matters.csv'
 
-def init_anthropic_client():
-    claude_api_key = st.secrets["CLAUDE_API_KEY"]
-    if not claude_api_key:
-        st.error("Anthropic API key not found. Please check your Streamlit secrets configuration.")
-        st.stop()
-    return Anthropic(api_key=claude_api_key)
+@st.cache_data
+def load_data():
+    # Load the CSV file from GitHub, fill NaN with empty strings to avoid errors
+    return pd.read_csv(file_path).fillna("")
 
-client = init_anthropic_client()
+# Function to perform fuzzy conflict check and identify the matter numbers
+def fuzzy_conflict_check(full_name, email, phone_number, threshold=80):
+    matching_records = []
+    for index, row in data.iterrows():
+        client_name = str(row['Client Name'])
+        name_match = fuzz.partial_ratio(client_name, full_name)
+        if name_match >= threshold:
+            matching_records.append(row)
+    return pd.DataFrame(matching_records)
 
-def load_and_clean_data(file_path, encoding='utf-8'):
-    try:
-        data = pd.read_csv(file_path, encoding=encoding)
-    except UnicodeDecodeError:
-        # If UTF-8 fails, try latin-1
-        data = pd.read_csv(file_path, encoding='latin-1')
+# Function to check for potential conflicts in matter descriptions
+def check_matter_conflicts(matching_records, full_name):
+    direct_conflicts = []
+    positional_conflicts = []
+    personal_conflicts = []
 
-    def clean_text(text):
-        if isinstance(text, str):
-            # Remove non-printable characters
-            text = ''.join(char for char in text if char.isprintable())
-            # Normalize unicode characters
-            text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('ascii')
-            # Replace specific problematic sequences
-            text = text.replace('Ã¢ÂÂ', "'").replace('Ã¢ÂÂ¨', ", ")
-            # Remove any remaining unicode escape sequences
-            text = re.sub(r'\\u[0-9a-fA-F]{4}', '', text)
-            # Replace multiple spaces with a single space
-            text = re.sub(r'\s+', ' ', text).strip()
-        return text
+    for index, row in matching_records.iterrows():
+        matter_description = str(row['Matter Description']).lower()
+        client_name = row['Client Name'].lower()
 
-    # Clean column names
-    data.columns = data.columns.str.replace('ï»¿', '').str.replace('Ã', '').str.strip()
+        # Direct Conflicts
+        if full_name.lower() in matter_description:
+            direct_conflicts.append(row)
 
-    # Clean text in all columns
-    for col in data.columns:
-        data[col] = data[col].apply(clean_text)
+        # Personal Conflicts (if any specific names of attorneys or clients are mentioned)
+        if any(name in matter_description for name in [full_name.lower()]):
+            personal_conflicts.append(row)
+        
+        # Example positional conflicts (this may need more sophisticated logic)
+        if re.search(r'\b(?:opposing|adverse)\b', matter_description):
+            positional_conflicts.append(row)
 
-    # Remove unnamed columns
-    data = data.loc[:, ~data.columns.str.contains('^Unnamed')]
+    return pd.DataFrame(direct_conflicts), pd.DataFrame(positional_conflicts), pd.DataFrame(personal_conflicts)
 
-    return data
+# Streamlit app
+st.title("Scale LLP Conflict Check System")
 
-@st.cache_resource
-def create_weighted_vector_db(data):
-    weights = {
-        'Attorney': 2.0,
-        'Role Detail': 2.0,
-        'Practice Group': 1.5,
-        'Summary': 1.5,
-        'Area of Expertise': 1.5,
-        'Matter Description': 1.0
-    }
+# Input fields for client information
+full_name = st.text_input("Enter Client's Full Name")
+email = st.text_input("Enter Client's Email")
+phone_number = st.text_input("Enter Client's Phone Number")
 
-    def weighted_text(row):
-        return ' '.join([
-            ' '.join([str(row[col])] * int(weight * 10))
-            for col, weight in weights.items() if col in row.index
-        ])
+# Load the CSV data
+data = load_data()
 
-    combined_text = data.apply(weighted_text, axis=1)
+# Buttons
+col1, col2 = st.columns([2, 1])
+with col1:
+    conflict_check_clicked = st.button("Check for Conflict")
 
-    vectorizer = TfidfVectorizer(stop_words='english', max_features=5000)
-    X = vectorizer.fit_transform(combined_text)
-    X_normalized = normalize(X, norm='l2', axis=1, copy=False)
+with col2:
+    create_graph_clicked = st.button("Create Relationship Graph", disabled=not conflict_check_clicked)
+
+if conflict_check_clicked:
+    results = fuzzy_conflict_check(full_name, email, phone_number)
     
-    index = faiss.IndexFlatIP(X.shape[1])
-    index.add(np.ascontiguousarray(X_normalized.toarray()))
-    return index, vectorizer
+    if not results.empty:
+        # Drop the unnecessary columns (Attorney, Client, Practice Area, Matter Number, Matter Description)
+        columns_to_drop = ['Attorney', 'Client', 'Practice Area', 'Matter Number', 'Matter Description']
+        results_cleaned = results.drop(columns=[col for col in columns_to_drop if col in results.columns])
+        
+        # Conflict Analysis
+        direct_conflicts, positional_conflicts, personal_conflicts = check_matter_conflicts(results, full_name)
 
-def call_claude(messages):
-    try:
-        system_message = messages[0]['content'] if messages[0]['role'] == 'system' else ""
-        user_message = next(msg['content'] for msg in messages if msg['role'] == 'user')
-        prompt = f"{system_message}\n\nHuman: {user_message}\n\nAssistant:"
+        # Display conflict results
+        st.success(f"Conflict found! Scale LLP has previously worked with the client.")
+        st.dataframe(results_cleaned)
 
-        response = client.completions.create(
-            model="claude-2.1",
-            prompt=prompt,
-            max_tokens_to_sample=500,
-            temperature=0.7
-        )
-        return response.completion
-    except Exception as e:
-        st.error(f"Error calling Claude: {e}")
-        return None
+        if not direct_conflicts.empty:
+            st.subheader("Direct Conflicts")
+            st.dataframe(direct_conflicts)
+        
+        if not positional_conflicts.empty:
+            st.subheader("Positional Conflicts")
+            st.dataframe(positional_conflicts)
 
-def expand_query(query):
-    """
-    Expand the query with synonyms and related words.
-    """
-    expanded_query = []
-    for word, tag in nltk.pos_tag(nltk.word_tokenize(query)):
-        synsets = wordnet.synsets(word)
-        if synsets:
-            synonyms = set()
-            for synset in synsets:
-                synonyms.update(lemma.name().replace('_', ' ') for lemma in synset.lemmas())
-            expanded_query.extend(list(synonyms)[:3])  # Limit to 3 synonyms per word
-        expanded_query.append(word)
-    return ' '.join(expanded_query)
-
-def normalize_query(query):
-    """
-    Normalize the query by removing punctuation and converting to lowercase.
-    """
-    query = re.sub(r'[^\w\s]', '', query)
-    return query.lower()
-
-def query_claude_with_data(question, matters_data, matters_index, matters_vectorizer):
-    # Normalize and expand the question
-    normalized_question = normalize_query(question)
-    expanded_question = expand_query(normalized_question)
-    
-    question_vec = matters_vectorizer.transform([expanded_question])
-    D, I = matters_index.search(normalize(question_vec).toarray(), k=5)  # Increased k to 30
-
-    relevant_data = matters_data.iloc[I[0]]
-
-    # Calculate relevance scores
-    relevance_scores = 1 / (1 + D[0])
-    relevant_data['relevance_score'] = relevance_scores
-
-    # Sort by relevance score
-    relevant_data = relevant_data.sort_values('relevance_score', ascending=False)
-
-    # Get unique lawyers
-    unique_lawyers = relevant_data['Attorney'].unique()
-
-    # Ensure we have at least 3 unique lawyers (if available)
-    if len(unique_lawyers) < 3:
-        additional_lawyers = matters_data[~matters_data['Attorney'].isin(unique_lawyers)].sample(min(3 - len(unique_lawyers), len(matters_data) - len(unique_lawyers)))
-        relevant_data = pd.concat([relevant_data, additional_lawyers])
-
-    # Get top 3 unique lawyers
-    top_lawyers = relevant_data['Attorney'].unique()[:3]
-
-    # Get all matters for top 3 lawyers, sorted by relevance
-    top_relevant_data = relevant_data[relevant_data['Attorney'].isin(top_lawyers)].sort_values('relevance_score', ascending=False)
-
-    primary_info = top_relevant_data[['Attorney', 'Work Email', 'Role Detail', 'Practice Group', 'Summary', 'Area of Expertise']].drop_duplicates(subset=['Attorney'])
-    secondary_info = top_relevant_data[['Attorney', 'Matter Description', 'relevance_score']]
-
-    primary_context = primary_info.to_string(index=False)
-    secondary_context = secondary_info.to_string(index=False)
-
-    messages = [
-        {"role": "system", "content": "You are an expert legal consultant tasked with recommending the best lawyers based on the given information. Analyze the primary information about the lawyers and consider the secondary information about their matters to refine your recommendation. Pay attention to the relevance scores provided."},
-        {"role": "user", "content": f"Question: {question}\n\nTop Lawyers Information:\n{primary_context}\n\nRelated Matters (including relevance scores):\n{secondary_context}\n\nBased on all this information, provide your final recommendation for the most suitable lawyer(s) and explain your reasoning in detail. Consider the relevance scores when making your recommendation. Recommend up to 3 lawyers, discussing their relevant experience and matters they've worked on. If fewer than 3 lawyers are relevant, only recommend those who are truly suitable."}
-    ]
-
-    claude_response = call_claude(messages)
-    if not claude_response:
-        return
-
-    st.write("### Claude's Recommendation:")
-    st.write(claude_response)
-
-    st.write("### Top Recommended Lawyer(s) Information:")
-    st.write(primary_info.to_html(index=False), unsafe_allow_html=True)
-
-    st.write("### Related Matters of Recommended Lawyer(s):")
-    st.write(secondary_info.to_html(index=False), unsafe_allow_html=True)
-
-# Streamlit app layout
-st.title("Rolodex AI: Find Your Legal Match 👨‍⚖️ Utilizing Claude 3.5")
-st.write("Ask questions about the skill-matched lawyers for your specific legal needs:")
-
-default_questions = {
-    "Which attorneys have the most experience with intellectual property?": "intellectual property",
-    "Can you recommend a lawyer specializing in employment law?": "employment law",
-    "Who are the best litigators for financial cases?": "financial law",
-    "Which lawyer should I contact for real estate matters?": "real estate"
-}
-
-user_input = st.text_input("Type your question:", placeholder="e.g., 'Who are the top lawyers for corporate law?'")
-
-for question, _ in default_questions.items():
-    if st.button(question):
-        user_input = question
-        break
-
-if user_input:
-    progress_bar = st.progress(0)
-    progress_bar.progress(10)
-    matters_data = load_and_clean_data('Cleaned_Matters_Data.csv')
-    if not matters_data.empty:
-        progress_bar.progress(50)
-        matters_index, matters_vectorizer = create_weighted_vector_db(matters_data)
-        progress_bar.progress(90)
-        query_claude_with_data(user_input, matters_data, matters_index, matters_vectorizer)
-        progress_bar.progress(100)
+        if not personal_conflicts.empty:
+            st.subheader("Personal Conflicts")
+            st.dataframe(personal_conflicts)
+        
     else:
-        st.error("Failed to load data.")
-    progress_bar.empty()
+        st.info("No conflicts found. Scale LLP has not worked with this client.")
 
-# Feedback section
-st.write("### How accurate was this result?")
-accuracy_choice = st.radio("Please select one:", ["Accurate", "Not Accurate", "Type your own feedback"])
+# Generate the relationship graph when the "Create Relationship Graph" button is clicked
+if create_graph_clicked and not results.empty:
+    # Create a graph for relationships
+    G = create_relationship_graph(data)
 
-if accuracy_choice == "Type your own feedback":
-    custom_feedback = st.text_input("Please provide your feedback:")
-else:
-    custom_feedback = accuracy_choice
+    # Visualize the graph using Pyvis
+    net = visualize_graph(G)
 
-if st.button("Submit Feedback"):
-    if custom_feedback:
-        st.write(f"Thank you for your feedback: '{custom_feedback}'")
-    else:
-        st.error("Please provide feedback before submitting.")
+    # Show the graph in Streamlit
+    net.save_graph('relationship_graph.html')
+    HtmlFile = open('relationship_graph.html', 'r', encoding='utf-8')
+    source_code = HtmlFile.read()
+    components.html(source_code, height=800)
+
+# Sidebar
+st.sidebar.title("📊 Data Overview")
+num_matters = len(data)
+st.sidebar.markdown(f"<h2 style='color: #4CAF50;'>Number of Matters Worked with: {num_matters}</h2>", unsafe_allow_html=True)
+st.sidebar.markdown(
+    "<div style='background-color: #f0f0f5; padding: 10px; border-radius: 5px; border: 1px solid #ccc;'>"
+    "<strong>Data Updated from Clio API</strong><br>Last Update: <strong>9/14/2024</strong>"
+    "</div>", unsafe_allow_html=True
+)
