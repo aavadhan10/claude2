@@ -7,8 +7,13 @@ file_path = 'https://raw.githubusercontent.com/aavadhan10/Conflict-Checks/main/c
 
 @st.cache_data
 def load_data():
-    # Load the CSV file from GitHub, fill NaN with empty strings to avoid errors
-    return pd.read_csv(file_path).fillna("")
+    # Load the CSV file from GitHub with error handling
+    try:
+        # Load the CSV file, skipping problematic lines
+        return pd.read_csv(file_path, error_bad_lines=False, warn_bad_lines=True).fillna("")
+    except Exception as e:
+        st.error(f"Error loading data: {e}")
+        return pd.DataFrame()  # Return an empty DataFrame in case of failure
 
 # Streamlit app for conflict check
 st.title("Scale LLP Conflict Check System")
@@ -67,4 +72,3 @@ st.sidebar.markdown(
     "<strong>Data Updated from Clio API</strong><br>Last Update: <strong>9/14/2024</strong>"
     "</div>", unsafe_allow_html=True
 )
-
