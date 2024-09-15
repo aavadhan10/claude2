@@ -1,16 +1,29 @@
 import pandas as pd
 import streamlit as st
 from thefuzz import fuzz
+import io
+import requests
 
 # Correct raw URL to the CSV from GitHub
 file_path = 'https://raw.githubusercontent.com/aavadhan10/Conflict-Checks/main/combined_contact_and_matters.csv'
 
 @st.cache_data
 def load_data():
-    # Load the CSV file from GitHub with error handling
     try:
-        # Load the CSV file, skipping problematic lines
-        return pd.read_csv(file_path, on_bad_lines='skip', delimiter=',').fillna("")
+        # Fetch the content of the CSV file
+        response = requests.get(file_path)
+        response.raise_for_status()  # Raise an exception for bad responses
+        
+        # Read the CSV content
+        csv_content = io.StringIO(response.text)
+        
+        # Load the CSV file, skipping problematic lines and specifying the expected number of columns
+        df = pd.read_csv(csv_content, on_bad_lines='skip', delimiter=',', error_bad_lines=False, warn_bad_lines=True)
+        
+        # Fill NaN values with empty strings
+        df = df.fillna("")
+        
+        return df
     except Exception as e:
         st.error(f"Error loading data: {e}")
         return pd.DataFrame()  # Return an empty DataFrame in case of failure
@@ -29,35 +42,31 @@ data = load_data()
 # Function to perform fuzzy conflict check and identify the matter numbers
 def fuzzy_conflict_check(full_name, email, phone_number, threshold=80):
     matching_records = []
-
     for index, row in data.iterrows():
         # Ensure the 'Client Name' field is a string before performing the fuzzy match
-        client_name = str(row['Client Name'])
-
+        client_name = str(row.get('Client Name', ''))
         # Fuzzy match for the client name
-        name_match = fuzz.partial_ratio(client_name, full_name)
-
+        name_match = fuzz.partial_ratio(client_name.lower(), full_name.lower())
         # Add matching records if the name similarity exceeds the threshold
         if name_match >= threshold:
             matching_records.append(row)
-
     # Convert list of matching rows to DataFrame
     return pd.DataFrame(matching_records)
 
 # Check for Conflict button
 if st.button("Check for Conflict"):
-    results = fuzzy_conflict_check(full_name, email, phone_number)
-
-    if not results.empty:
-        # Drop the unnecessary columns (Attorney, Client, Practice Area, Matter Number, Matter Description)
-        columns_to_drop = ['Attorney', 'Client', 'Practice Area', 'Matter Number', 'Matter Description']
-        results_cleaned = results.drop(columns=[col for col in columns_to_drop if col in results.columns])
-
-        st.success("Conflict found! Scale LLP has previously worked with the client.")
-        st.dataframe(results_cleaned)
-
+    if data.empty:
+        st.error("Unable to perform conflict check due to data loading issues. Please try again later or contact support.")
     else:
-        st.info("No conflicts found. Scale LLP has not worked with this client.")
+        results = fuzzy_conflict_check(full_name, email, phone_number)
+        if not results.empty:
+            # Drop the unnecessary columns (Attorney, Client, Practice Area, Matter Number, Matter Description)
+            columns_to_drop = ['Attorney', 'Client', 'Practice Area', 'Matter Number', 'Matter Description']
+            results_cleaned = results.drop(columns=[col for col in columns_to_drop if col in results.columns])
+            st.success("Conflict found! Scale LLP has previously worked with the client.")
+            st.dataframe(results_cleaned)
+        else:
+            st.info("No conflicts found. Scale LLP has not worked with this client.")
 
 # Sidebar
 st.sidebar.title("📊 Data Overview")
@@ -72,3 +81,9 @@ st.sidebar.markdown(
     "<strong>Data Updated from Clio API</strong><br>Last Update: <strong>9/14/2024</strong>"
     "</div>", unsafe_allow_html=True
 )
+
+# Display data loading status
+if data.empty:
+    st.sidebar.error("⚠️ Data loading failed. The conflict check system may not work properly.")
+else:
+    st.sidebar.success("✅ Data loaded successfully")
