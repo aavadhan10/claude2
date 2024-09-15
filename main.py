@@ -2,7 +2,7 @@ import pandas as pd
 import streamlit as st
 from thefuzz import fuzz
 
-# File path to the CSV from GitHub
+# File path to the RAW CSV from GitHub (make sure this is the correct raw link)
 file_path = 'https://raw.githubusercontent.com/aavadhan10/Conflict-Checks/main/combined_contact_and_matters.csv'
 
 @st.cache_data
