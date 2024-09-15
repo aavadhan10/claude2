@@ -10,7 +10,7 @@ def load_data():
     # Load the CSV file from GitHub with error handling
     try:
         # Load the CSV file, skipping problematic lines
-        return pd.read_csv(file_path, error_bad_lines=False, warn_bad_lines=True).fillna("")
+        return pd.read_csv(file_path, on_bad_lines='skip', delimiter=',').fillna("")
     except Exception as e:
         st.error(f"Error loading data: {e}")
         return pd.DataFrame()  # Return an empty DataFrame in case of failure
