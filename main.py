@@ -67,44 +67,20 @@ def load_and_clean_data(file_path, encoding='utf-8'):
 
 @st.cache_resource
 def create_weighted_vector_db(data):
-    """Create weighted vector database with enhanced features."""
-    weights = {
-        'Attorney': 2.0,
-        'Role Detail': 2.5,
-        'Practice Group': 2.0,
-        'Summary': 2.0,
-        'Area of Expertise': 2.5,
-        'Matter Description': 1.5,
-        'Work Email': 0.5
-    }
-
-    # Create expertise-based feature
-    data['expertise_combined'] = data.apply(
-        lambda row: f"{row['Practice Group']} {row['Area of Expertise']} {row['Role Detail']}", 
+    """Simplified vector database creation without weights."""
+    # Combine all relevant fields
+    combined_text = data.apply(
+        lambda row: ' '.join([
+            str(row['Attorney']),
+            str(row['Role Detail']),
+            str(row['Practice Group']),
+            str(row['Summary']),
+            str(row['Area of Expertise']),
+            str(row['Matter Description'])
+        ]), 
         axis=1
     )
 
-    def weighted_text(row):
-        text_parts = []
-        for col, weight in weights.items():
-            if col in row.index:
-                if col in ['Practice Group', 'Area of Expertise', 'Role Detail']:
-                    text_parts.extend([str(row[col])] * int(weight * 15))
-                elif col == 'Matter Description':
-                    desc = str(row[col]).lower()
-                    legal_terms = ['litigation', 'counsel', 'advised', 'represented', 'negotiated']
-                    for term in legal_terms:
-                        if term in desc:
-                            text_parts.extend([term] * int(weight * 10))
-                else:
-                    text_parts.extend([str(row[col])] * int(weight * 10))
-        
-        text_parts.extend([str(row['expertise_combined'])] * 25)
-        return ' '.join(text_parts)
-
-    combined_text = data.apply(weighted_text, axis=1)
-
-    legal_stop_words = ['law', 'legal', 'lawyer', 'attorney', 'firm', 'practice', 'services']
     vectorizer = TfidfVectorizer(
         stop_words='english',
         max_features=7500,
@@ -126,7 +102,6 @@ def call_claude(messages):
         system_message = messages[0]['content'] if messages[0]['role'] == 'system' else ""
         user_message = next(msg['content'] for msg in messages if msg['role'] == 'user')
 
-        # Use claude-2.1 which is supported by the completions API
         response = client.completions.create(
             model="claude-2.1",
             prompt=f"{system_message}\n\nHuman: {user_message}\n\nAssistant:",
@@ -179,17 +154,19 @@ def normalize_query(query):
     return query.lower().strip()
 
 def query_claude_with_data(question, matters_data, matters_index, matters_vectorizer):
-    """Enhanced query function with much broader lawyer selection."""
+    """Simplified query function with broader lawyer selection."""
     normalized_question = normalize_query(question)
     expanded_question = expand_query(normalized_question)
     
-    # Massively increase initial search pool
+    # Get large initial pool
     question_vec = matters_vectorizer.transform([expanded_question])
-    D, I = matters_index.search(normalize(question_vec).toarray(), k=200)  # Get many more initial matches
+    D, I = matters_index.search(normalize(question_vec).toarray(), k=200)
 
-    relevant_data = matters_data.iloc[I[0]]
-
-    # Create a more comprehensive scoring system
+    # Get all relevant matters
+    relevant_indices = I[0]
+    relevant_data = matters_data.iloc[relevant_indices].copy()
+    
+    # Simple scoring based on text matching
     def calculate_match_score(row, query_terms):
         score = 0
         row_text = ' '.join([
@@ -200,57 +177,46 @@ def query_claude_with_data(question, matters_data, matters_index, matters_vector
             str(row['Summary']).lower()
         ])
         
-        # Check for any term matches
+        # Simple term matching
         for term in query_terms:
             if term in row_text:
-                score += 0.5
-            
-            # Check for partial matches
-            for field_text in [str(row['Practice Group']).lower(), 
-                             str(row['Area of Expertise']).lower(), 
-                             str(row['Role Detail']).lower()]:
-                if term in field_text:
-                    score += 0.3
+                score += 1
         
-        # Add base relevance score
-        score += 1 / (1 + D[0][I[0].tolist().index(row.name)])
         return score
 
-    # Calculate new relevance scores
+    # Calculate scores
     query_terms = set(normalized_question.split() + expanded_question.split())
     relevant_data['relevance_score'] = relevant_data.apply(
         lambda row: calculate_match_score(row, query_terms), axis=1
     )
 
-    # Group by attorney and take their maximum score
+    # Group by attorney and get their best score
     attorney_scores = relevant_data.groupby('Attorney')['relevance_score'].max()
     
-    # Get all attorneys above a very lenient threshold
-    qualified_attorneys = attorney_scores[attorney_scores > 0.1].index
+    # Get all attorneys with any matches
+    qualified_attorneys = attorney_scores[attorney_scores > 0].index
     
     # Get all data for qualified attorneys
-    relevant_data = matters_data[matters_data['Attorney'].isin(qualified_attorneys)]
-    
-    # Add back relevance scores
-    relevant_data['relevance_score'] = relevant_data.apply(
+    all_attorney_data = matters_data[matters_data['Attorney'].isin(qualified_attorneys)]
+    all_attorney_data['relevance_score'] = all_attorney_data.apply(
         lambda row: calculate_match_score(row, query_terms), axis=1
     )
     
     # Sort by score
-    relevant_data = relevant_data.sort_values('relevance_score', ascending=False)
+    all_attorney_data = all_attorney_data.sort_values('relevance_score', ascending=False)
     
-    # Get top 10 attorneys with their best matching matters
-    top_attorneys = relevant_data['Attorney'].unique()[:10]  # Increased to 10
-    top_relevant_data = relevant_data[relevant_data['Attorney'].isin(top_attorneys)]
+    # Get top 15 attorneys
+    top_attorneys = all_attorney_data['Attorney'].unique()[:15]
+    top_attorney_data = all_attorney_data[all_attorney_data['Attorney'].isin(top_attorneys)]
 
     # Get unique attorney info
-    primary_info = (top_relevant_data[['Attorney', 'Work Email', 'Role Detail', 
+    primary_info = (top_attorney_data[['Attorney', 'Work Email', 'Role Detail', 
                                      'Practice Group', 'Summary', 'Area of Expertise']]
-                   .sort_values('Attorney')
+                   .sort_values(['relevance_score'], ascending=[False])
                    .drop_duplicates(subset=['Attorney']))
     
-    # Get their relevant matters
-    secondary_info = (top_relevant_data[['Attorney', 'Matter Description', 'relevance_score']]
+    # Get their matters
+    secondary_info = (top_attorney_data[['Attorney', 'Matter Description', 'relevance_score']]
                      .sort_values(['Attorney', 'relevance_score'], ascending=[True, False]))
 
     # Format context for Claude
@@ -260,11 +226,13 @@ def query_claude_with_data(question, matters_data, matters_index, matters_vector
     messages = [
         {"role": "system", "content": """You are an expert legal consultant tasked with providing comprehensive lawyer recommendations.
 Key requirements:
-1. Present ALL relevant lawyers (up to 10) who might be valuable for the query
+1. Present ALL relevant lawyers (up to 15) who might be valuable for the query
 2. Include lawyers with both direct and related expertise
-3. Explain each lawyer's potential value, even if their match isn't perfect
+3. Explain each lawyer's potential value
 4. Consider both primary expertise and related experience
-5. Focus on providing options rather than filtering them out"""},
+5. Focus on providing options rather than filtering them out
+
+Important: The goal is to provide a broad range of options for the query."""},
         {"role": "user", "content": f"""Query: {question}
 
 {primary_context}
@@ -277,7 +245,8 @@ For each lawyer, explain:
 2. Why they might be valuable for this query
 3. Any unique perspective or experience they bring
 
-Important: Include ALL lawyers who might be helpful, even if their expertise is related rather than direct."""}
+Important: Include ALL lawyers who might be helpful, even if their expertise is related rather than direct.
+Do not filter out lawyers unless they are completely irrelevant to the query."""}
     ]
 
     claude_response = call_claude(messages)
@@ -330,7 +299,9 @@ def main():
                 progress_bar.progress(50)
                 matters_index, matters_vectorizer = create_weighted_vector_db(matters_data)
                 progress_bar.progress(90)
-                claude_response, primary_info, secondary_info = query_claude_with_data(user_input, matters_data, matters_index, matters_vectorizer)
+                claude_response, primary_info, secondary_info = query_claude_with_data(
+                    user_input, matters_data, matters_index, matters_vectorizer
+                )
                 progress_bar.progress(100)
             else:
                 st.error("Failed to load data.")
