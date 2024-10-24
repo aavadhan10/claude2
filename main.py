@@ -121,16 +121,16 @@ def create_weighted_vector_db(data):
     return index, vectorizer
 
 def call_claude(messages):
-    """Call Claude API with enhanced error handling."""
+    """Call Claude API with correct model and format."""
     try:
         system_message = messages[0]['content'] if messages[0]['role'] == 'system' else ""
         user_message = next(msg['content'] for msg in messages if msg['role'] == 'user')
-        prompt = f"{system_message}\n\nHuman: {user_message}\n\nAssistant:"
 
+        # Use claude-2.1 which is supported by the completions API
         response = client.completions.create(
-            model="claude-3-sonnet-20240229",  # Updated to latest model
-            prompt=prompt,
-            max_tokens_to_sample=1000,  # Increased for more detailed responses
+            model="claude-2.1",  # Changed back to claude-2.1
+            prompt=f"{system_message}\n\nHuman: {user_message}\n\nAssistant:",
+            max_tokens_to_sample=1000,
             temperature=0.7
         )
         return response.completion
