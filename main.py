@@ -179,45 +179,63 @@ def normalize_query(query):
     return query.lower().strip()
 
 def query_claude_with_data(question, matters_data, matters_index, matters_vectorizer):
-    """Enhanced query function with broader lawyer selection."""
+    """Enhanced query function with much broader lawyer selection."""
     normalized_question = normalize_query(question)
     expanded_question = expand_query(normalized_question)
     
-    # Increase initial search pool
+    # Increase initial search pool significantly
     question_vec = matters_vectorizer.transform([expanded_question])
-    D, I = matters_index.search(normalize(question_vec).toarray(), k=20)  # Increased from 10 to 20
+    D, I = matters_index.search(normalize(question_vec).toarray(), k=50)  # Increased from 20 to 50
 
     relevant_data = matters_data.iloc[I[0]]
 
-    # Calculate base scores with adjusted relevance
+    # Calculate base scores with more lenient relevance
     base_scores = 1 / (1 + D[0])
     expertise_bonus = []
     for _, row in relevant_data.iterrows():
         bonus = 0
-        if any(term.lower() in row['Practice Group'].lower() for term in normalized_question.split()):
-            bonus += 0.3
-        if any(term.lower() in row['Area of Expertise'].lower() for term in normalized_question.split()):
-            bonus += 0.2
-        # Add partial match bonus
-        if any(term.lower() in str(row['Matter Description']).lower() for term in normalized_question.split()):
-            bonus += 0.1
+        # More lenient matching
+        query_terms = set(normalized_question.split())
+        practice_terms = set(str(row['Practice Group']).lower().split())
+        expertise_terms = set(str(row['Area of Expertise']).lower().split())
+        matter_terms = set(str(row['Matter Description']).lower().split())
+        
+        # Check for partial matches
+        practice_matches = len(query_terms.intersection(practice_terms))
+        expertise_matches = len(query_terms.intersection(expertise_terms))
+        matter_matches = len(query_terms.intersection(matter_terms))
+        
+        # Award partial match bonuses
+        bonus += practice_matches * 0.2
+        bonus += expertise_matches * 0.15
+        bonus += matter_matches * 0.1
+        
+        # Additional bonus for key terms
+        key_terms = ['litigation', 'litigator', 'trial', 'court', 'lawsuit'] if 'litigator' in normalized_question else []
+        if key_terms:
+            for term in key_terms:
+                if term in str(row['Matter Description']).lower():
+                    bonus += 0.1
+                if term in str(row['Practice Group']).lower():
+                    bonus += 0.15
+                if term in str(row['Area of Expertise']).lower():
+                    bonus += 0.15
+        
         expertise_bonus.append(bonus)
     
     final_scores = base_scores + expertise_bonus
     relevant_data['relevance_score'] = final_scores
 
-    # Adjust filtering thresholds
-    relevance_threshold = 0.3  # Lowered from 0.4 to include more results
+    # Much more lenient filtering thresholds
+    relevance_threshold = 0.2  # Lowered from 0.3
     relevant_data = relevant_data[relevant_data['relevance_score'] >= relevance_threshold]
     relevant_data = relevant_data.sort_values('relevance_score', ascending=False)
 
-    # Adjust matter count requirement
+    # No minimum matter count requirement
     lawyer_matter_counts = relevant_data.groupby('Attorney').size()
-    qualified_lawyers = lawyer_matter_counts[lawyer_matter_counts >= 1].index  # Reduced from 2 to 1
-    relevant_data = relevant_data[relevant_data['Attorney'].isin(qualified_lawyers)]
-
-    # Get top 5 lawyers instead of 3
-    top_lawyers = relevant_data['Attorney'].unique()[:5]
+    
+    # Get more top lawyers
+    top_lawyers = relevant_data['Attorney'].unique()[:8]  # Increased from 5 to 8
     top_relevant_data = relevant_data[relevant_data['Attorney'].isin(top_lawyers)]
 
     primary_info = top_relevant_data[['Attorney', 'Work Email', 'Role Detail', 'Practice Group', 'Summary', 'Area of Expertise']].drop_duplicates(subset=['Attorney'])
@@ -229,37 +247,38 @@ def query_claude_with_data(question, matters_data, matters_index, matters_vector
 
     messages = [
         {"role": "system", "content": """You are an expert legal consultant with deep knowledge of law firm operations. 
-Your task is to recommend the most suitable lawyers based on the provided information and explain why they are the best fit.
-Consider these key factors in your analysis:
+Your task is to recommend suitable lawyers based on the provided information, providing a comprehensive list of options.
+Consider these factors in your analysis:
 1. Direct expertise match with the query
-2. Depth of experience in relevant areas
-3. Complexity and scope of handled matters
+2. Related or transferable experience
+3. Depth of experience in relevant areas
 4. Overall relevance scores
 
-Important: If there are multiple lawyers with relevant expertise, please discuss all of them (up to 5).
+Important: Present ALL potentially relevant lawyers (up to 8).
 For each lawyer, provide:
 - Their key areas of expertise
-- Most relevant experience
-- Why they might be suitable for this query
-Even if some lawyers are less directly matched, explain how their experience might still be valuable."""},
+- Relevant experience (both direct and related)
+- Why they might be valuable for this query
+Include lawyers with related expertise who might bring valuable perspective to the matter."""},
         {"role": "user", "content": f"""Query: {question}
 
 {primary_context}
 
 {secondary_context}
 
-Based on this information, recommend suitable lawyers for this query. 
-Focus on specific experiences and matters that directly relate to the query.
-Please discuss ALL relevant lawyers (up to 5), even if some are less perfectly matched.
-For each recommended lawyer, explain:
-1. Their relevant expertise
-2. Key matching experience
-3. Why they might be valuable for this query"""}
+Please provide a comprehensive list of lawyers who could assist with this query.
+Include both directly matched experts and those with related valuable experience.
+For each lawyer, explain:
+1. Their areas of expertise
+2. Relevant experience (both direct and related)
+3. Why they might be valuable for this specific query
+
+Important: Please discuss ALL relevant lawyers, even those with less direct but potentially valuable experience."""}
     ]
 
     claude_response = call_claude(messages)
     if claude_response:
-        st.write("### Claude's Recommendation:")
+        st.write("### Claude's Recommendations:")
         st.write(claude_response)
 
         st.write("### Top Recommended Lawyer(s) Information:")
