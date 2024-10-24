@@ -183,97 +183,101 @@ def query_claude_with_data(question, matters_data, matters_index, matters_vector
     normalized_question = normalize_query(question)
     expanded_question = expand_query(normalized_question)
     
-    # Increase initial search pool significantly
+    # Massively increase initial search pool
     question_vec = matters_vectorizer.transform([expanded_question])
-    D, I = matters_index.search(normalize(question_vec).toarray(), k=50)  # Increased from 20 to 50
+    D, I = matters_index.search(normalize(question_vec).toarray(), k=200)  # Get many more initial matches
 
     relevant_data = matters_data.iloc[I[0]]
 
-    # Calculate base scores with more lenient relevance
-    base_scores = 1 / (1 + D[0])
-    expertise_bonus = []
-    for _, row in relevant_data.iterrows():
-        bonus = 0
-        # More lenient matching
-        query_terms = set(normalized_question.split())
-        practice_terms = set(str(row['Practice Group']).lower().split())
-        expertise_terms = set(str(row['Area of Expertise']).lower().split())
-        matter_terms = set(str(row['Matter Description']).lower().split())
+    # Create a more comprehensive scoring system
+    def calculate_match_score(row, query_terms):
+        score = 0
+        row_text = ' '.join([
+            str(row['Practice Group']).lower(),
+            str(row['Area of Expertise']).lower(),
+            str(row['Role Detail']).lower(),
+            str(row['Matter Description']).lower(),
+            str(row['Summary']).lower()
+        ])
         
-        # Check for partial matches
-        practice_matches = len(query_terms.intersection(practice_terms))
-        expertise_matches = len(query_terms.intersection(expertise_terms))
-        matter_matches = len(query_terms.intersection(matter_terms))
+        # Check for any term matches
+        for term in query_terms:
+            if term in row_text:
+                score += 0.5
+            
+            # Check for partial matches
+            for field_text in [str(row['Practice Group']).lower(), 
+                             str(row['Area of Expertise']).lower(), 
+                             str(row['Role Detail']).lower()]:
+                if term in field_text:
+                    score += 0.3
         
-        # Award partial match bonuses
-        bonus += practice_matches * 0.2
-        bonus += expertise_matches * 0.15
-        bonus += matter_matches * 0.1
-        
-        # Additional bonus for key terms
-        key_terms = ['litigation', 'litigator', 'trial', 'court', 'lawsuit'] if 'litigator' in normalized_question else []
-        if key_terms:
-            for term in key_terms:
-                if term in str(row['Matter Description']).lower():
-                    bonus += 0.1
-                if term in str(row['Practice Group']).lower():
-                    bonus += 0.15
-                if term in str(row['Area of Expertise']).lower():
-                    bonus += 0.15
-        
-        expertise_bonus.append(bonus)
-    
-    final_scores = base_scores + expertise_bonus
-    relevant_data['relevance_score'] = final_scores
+        # Add base relevance score
+        score += 1 / (1 + D[0][I[0].tolist().index(row.name)])
+        return score
 
-    # Much more lenient filtering thresholds
-    relevance_threshold = 0.2  # Lowered from 0.3
-    relevant_data = relevant_data[relevant_data['relevance_score'] >= relevance_threshold]
+    # Calculate new relevance scores
+    query_terms = set(normalized_question.split() + expanded_question.split())
+    relevant_data['relevance_score'] = relevant_data.apply(
+        lambda row: calculate_match_score(row, query_terms), axis=1
+    )
+
+    # Group by attorney and take their maximum score
+    attorney_scores = relevant_data.groupby('Attorney')['relevance_score'].max()
+    
+    # Get all attorneys above a very lenient threshold
+    qualified_attorneys = attorney_scores[attorney_scores > 0.1].index
+    
+    # Get all data for qualified attorneys
+    relevant_data = matters_data[matters_data['Attorney'].isin(qualified_attorneys)]
+    
+    # Add back relevance scores
+    relevant_data['relevance_score'] = relevant_data.apply(
+        lambda row: calculate_match_score(row, query_terms), axis=1
+    )
+    
+    # Sort by score
     relevant_data = relevant_data.sort_values('relevance_score', ascending=False)
-
-    # No minimum matter count requirement
-    lawyer_matter_counts = relevant_data.groupby('Attorney').size()
     
-    # Get more top lawyers
-    top_lawyers = relevant_data['Attorney'].unique()[:8]  # Increased from 5 to 8
-    top_relevant_data = relevant_data[relevant_data['Attorney'].isin(top_lawyers)]
+    # Get top 10 attorneys with their best matching matters
+    top_attorneys = relevant_data['Attorney'].unique()[:10]  # Increased to 10
+    top_relevant_data = relevant_data[relevant_data['Attorney'].isin(top_attorneys)]
 
-    primary_info = top_relevant_data[['Attorney', 'Work Email', 'Role Detail', 'Practice Group', 'Summary', 'Area of Expertise']].drop_duplicates(subset=['Attorney'])
-    secondary_info = top_relevant_data[['Attorney', 'Matter Description', 'relevance_score']]
+    # Get unique attorney info
+    primary_info = (top_relevant_data[['Attorney', 'Work Email', 'Role Detail', 
+                                     'Practice Group', 'Summary', 'Area of Expertise']]
+                   .sort_values('Attorney')
+                   .drop_duplicates(subset=['Attorney']))
+    
+    # Get their relevant matters
+    secondary_info = (top_relevant_data[['Attorney', 'Matter Description', 'relevance_score']]
+                     .sort_values(['Attorney', 'relevance_score'], ascending=[True, False]))
 
-    # Enhanced context formatting for more lawyers
+    # Format context for Claude
     primary_context = "LAWYER PROFILES:\n" + primary_info.to_string(index=False)
     secondary_context = "\nRELEVANT MATTERS:\n" + secondary_info.to_string(index=False)
 
     messages = [
-        {"role": "system", "content": """You are an expert legal consultant with deep knowledge of law firm operations. 
-Your task is to recommend suitable lawyers based on the provided information, providing a comprehensive list of options.
-Consider these factors in your analysis:
-1. Direct expertise match with the query
-2. Related or transferable experience
-3. Depth of experience in relevant areas
-4. Overall relevance scores
-
-Important: Present ALL potentially relevant lawyers (up to 8).
-For each lawyer, provide:
-- Their key areas of expertise
-- Relevant experience (both direct and related)
-- Why they might be valuable for this query
-Include lawyers with related expertise who might bring valuable perspective to the matter."""},
+        {"role": "system", "content": """You are an expert legal consultant tasked with providing comprehensive lawyer recommendations.
+Key requirements:
+1. Present ALL relevant lawyers (up to 10) who might be valuable for the query
+2. Include lawyers with both direct and related expertise
+3. Explain each lawyer's potential value, even if their match isn't perfect
+4. Consider both primary expertise and related experience
+5. Focus on providing options rather than filtering them out"""},
         {"role": "user", "content": f"""Query: {question}
 
 {primary_context}
 
 {secondary_context}
 
-Please provide a comprehensive list of lawyers who could assist with this query.
-Include both directly matched experts and those with related valuable experience.
+Please provide a comprehensive analysis of ALL potentially relevant lawyers.
 For each lawyer, explain:
-1. Their areas of expertise
-2. Relevant experience (both direct and related)
-3. Why they might be valuable for this specific query
+1. Their relevant expertise and experience
+2. Why they might be valuable for this query
+3. Any unique perspective or experience they bring
 
-Important: Please discuss ALL relevant lawyers, even those with less direct but potentially valuable experience."""}
+Important: Include ALL lawyers who might be helpful, even if their expertise is related rather than direct."""}
     ]
 
     claude_response = call_claude(messages)
