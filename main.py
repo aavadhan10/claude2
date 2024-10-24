@@ -179,16 +179,17 @@ def normalize_query(query):
     return query.lower().strip()
 
 def query_claude_with_data(question, matters_data, matters_index, matters_vectorizer):
-    """Enhanced query function with improved matching and filtering."""
+    """Enhanced query function with broader lawyer selection."""
     normalized_question = normalize_query(question)
     expanded_question = expand_query(normalized_question)
     
+    # Increase initial search pool
     question_vec = matters_vectorizer.transform([expanded_question])
-    D, I = matters_index.search(normalize(question_vec).toarray(), k=10)
+    D, I = matters_index.search(normalize(question_vec).toarray(), k=20)  # Increased from 10 to 20
 
     relevant_data = matters_data.iloc[I[0]]
 
-    # Enhanced relevance scoring
+    # Calculate base scores with adjusted relevance
     base_scores = 1 / (1 + D[0])
     expertise_bonus = []
     for _, row in relevant_data.iterrows():
@@ -197,26 +198,32 @@ def query_claude_with_data(question, matters_data, matters_index, matters_vector
             bonus += 0.3
         if any(term.lower() in row['Area of Expertise'].lower() for term in normalized_question.split()):
             bonus += 0.2
+        # Add partial match bonus
+        if any(term.lower() in str(row['Matter Description']).lower() for term in normalized_question.split()):
+            bonus += 0.1
         expertise_bonus.append(bonus)
     
     final_scores = base_scores + expertise_bonus
     relevant_data['relevance_score'] = final_scores
 
-    # Enhanced filtering
-    relevance_threshold = 0.4
+    # Adjust filtering thresholds
+    relevance_threshold = 0.3  # Lowered from 0.4 to include more results
     relevant_data = relevant_data[relevant_data['relevance_score'] >= relevance_threshold]
     relevant_data = relevant_data.sort_values('relevance_score', ascending=False)
 
+    # Adjust matter count requirement
     lawyer_matter_counts = relevant_data.groupby('Attorney').size()
-    qualified_lawyers = lawyer_matter_counts[lawyer_matter_counts >= 2].index
+    qualified_lawyers = lawyer_matter_counts[lawyer_matter_counts >= 1].index  # Reduced from 2 to 1
     relevant_data = relevant_data[relevant_data['Attorney'].isin(qualified_lawyers)]
 
-    top_lawyers = relevant_data['Attorney'].unique()[:3]
+    # Get top 5 lawyers instead of 3
+    top_lawyers = relevant_data['Attorney'].unique()[:5]
     top_relevant_data = relevant_data[relevant_data['Attorney'].isin(top_lawyers)]
 
     primary_info = top_relevant_data[['Attorney', 'Work Email', 'Role Detail', 'Practice Group', 'Summary', 'Area of Expertise']].drop_duplicates(subset=['Attorney'])
     secondary_info = top_relevant_data[['Attorney', 'Matter Description', 'relevance_score']]
 
+    # Enhanced context formatting for more lawyers
     primary_context = "LAWYER PROFILES:\n" + primary_info.to_string(index=False)
     secondary_context = "\nRELEVANT MATTERS:\n" + secondary_info.to_string(index=False)
 
@@ -229,31 +236,29 @@ Consider these key factors in your analysis:
 3. Complexity and scope of handled matters
 4. Overall relevance scores
 
-Provide recommendations only if the lawyer's expertise clearly matches the query requirements."""},
+Important: If there are multiple lawyers with relevant expertise, please discuss all of them (up to 5).
+For each lawyer, provide:
+- Their key areas of expertise
+- Most relevant experience
+- Why they might be suitable for this query
+Even if some lawyers are less directly matched, explain how their experience might still be valuable."""},
         {"role": "user", "content": f"""Query: {question}
 
 {primary_context}
 
 {secondary_context}
 
-Based on this information, recommend the most suitable lawyer(s) for this query. 
+Based on this information, recommend suitable lawyers for this query. 
 Focus on specific experiences and matters that directly relate to the query.
-Only recommend lawyers whose expertise strongly matches the requirements.
-If none of the lawyers are a good fit, please state that clearly."""}
+Please discuss ALL relevant lawyers (up to 5), even if some are less perfectly matched.
+For each recommended lawyer, explain:
+1. Their relevant expertise
+2. Key matching experience
+3. Why they might be valuable for this query"""}
     ]
 
     claude_response = call_claude(messages)
-    if not claude_response:
-        return
-
-    st.write("### Claude's Recommendation:")
-    st.write(claude_response)
-
-    st.write("### Top Recommended Lawyer(s) Information:")
-    st.write(primary_info.to_html(index=False), unsafe_allow_html=True)
-
-    st.write("### Related Matters of Recommended Lawyer(s):")
-    st.write(secondary_info.to_html(index=False), unsafe_allow_html=True)
+    return claude_response, primary_info, secondary_info
 
 # Streamlit app layout
 def main():
