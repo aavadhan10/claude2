@@ -128,7 +128,7 @@ def call_claude(messages):
 
         # Use claude-2.1 which is supported by the completions API
         response = client.completions.create(
-            model="claude-2.1",  # Changed back to claude-2.1
+            model="claude-2.1",
             prompt=f"{system_message}\n\nHuman: {user_message}\n\nAssistant:",
             max_tokens_to_sample=1000,
             temperature=0.7
@@ -258,9 +258,18 @@ For each recommended lawyer, explain:
     ]
 
     claude_response = call_claude(messages)
+    if claude_response:
+        st.write("### Claude's Recommendation:")
+        st.write(claude_response)
+
+        st.write("### Top Recommended Lawyer(s) Information:")
+        st.write(primary_info.to_html(index=False), unsafe_allow_html=True)
+
+        st.write("### Related Matters of Recommended Lawyer(s):")
+        st.write(secondary_info.to_html(index=False), unsafe_allow_html=True)
+
     return claude_response, primary_info, secondary_info
 
-# Streamlit app layout
 def main():
     st.title("Rolodex AI: Find Your Legal Match 👨‍⚖️")
     st.write("Ask questions about the skill-matched lawyers for your specific legal needs:")
@@ -298,7 +307,7 @@ def main():
                 progress_bar.progress(50)
                 matters_index, matters_vectorizer = create_weighted_vector_db(matters_data)
                 progress_bar.progress(90)
-                query_claude_with_data(user_input, matters_data, matters_index, matters_vectorizer)
+                claude_response, primary_info, secondary_info = query_claude_with_data(user_input, matters_data, matters_index, matters_vectorizer)
                 progress_bar.progress(100)
             else:
                 st.error("Failed to load data.")
@@ -325,7 +334,6 @@ def main():
                 "feedback_text": feedback_text
             }
             st.success("Thank you for your feedback! This will help us improve the system.")
-            # Here you could add code to store the feedback in a database
         else:
             st.warning("Please provide at least one type of feedback before submitting.")
 
