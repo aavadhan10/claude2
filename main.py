@@ -10,13 +10,13 @@ import unicodedata
 import nltk
 from nltk.corpus import wordnet
 
-
 # Download required NLTK data
 nltk.download('wordnet', quiet=True)
 nltk.download('averaged_perceptron_tagger', quiet=True)
 nltk.download('punkt', quiet=True)
 
 def init_anthropic_client():
+    """Initialize Anthropic client with API key from Streamlit secrets."""
     claude_api_key = st.secrets["CLAUDE_API_KEY"]
     if not claude_api_key:
         st.error("Anthropic API key not found. Please check your Streamlit secrets configuration.")
@@ -26,6 +26,7 @@ def init_anthropic_client():
 client = init_anthropic_client()
 
 def load_and_clean_data(file_path, encoding='utf-8'):
+    """Load and clean CSV data with enhanced error handling and cleaning."""
     try:
         data = pd.read_csv(file_path, encoding=encoding)
     except UnicodeDecodeError:
@@ -44,6 +45,8 @@ def load_and_clean_data(file_path, encoding='utf-8'):
             text = re.sub(r'\\u[0-9a-fA-F]{4}', '', text)
             # Replace multiple spaces with a single space
             text = re.sub(r'\s+', ' ', text).strip()
+            # Convert to lowercase for consistency
+            text = text.lower()
         return text
 
     # Clean column names
@@ -56,28 +59,60 @@ def load_and_clean_data(file_path, encoding='utf-8'):
     # Remove unnamed columns
     data = data.loc[:, ~data.columns.str.contains('^Unnamed')]
 
+    # Remove rows with missing critical information
+    critical_columns = ['Attorney', 'Practice Group', 'Area of Expertise']
+    data = data.dropna(subset=critical_columns)
+
     return data
 
 @st.cache_resource
 def create_weighted_vector_db(data):
+    """Create weighted vector database with enhanced features."""
     weights = {
         'Attorney': 2.0,
-        'Role Detail': 2.0,
-        'Practice Group': 1.5,
-        'Summary': 1.5,
-        'Area of Expertise': 1.5,
-        'Matter Description': 1.0
+        'Role Detail': 2.5,
+        'Practice Group': 2.0,
+        'Summary': 2.0,
+        'Area of Expertise': 2.5,
+        'Matter Description': 1.5,
+        'Work Email': 0.5
     }
 
+    # Create expertise-based feature
+    data['expertise_combined'] = data.apply(
+        lambda row: f"{row['Practice Group']} {row['Area of Expertise']} {row['Role Detail']}", 
+        axis=1
+    )
+
     def weighted_text(row):
-        return ' '.join([
-            ' '.join([str(row[col])] * int(weight * 10))
-            for col, weight in weights.items() if col in row.index
-        ])
+        text_parts = []
+        for col, weight in weights.items():
+            if col in row.index:
+                if col in ['Practice Group', 'Area of Expertise', 'Role Detail']:
+                    text_parts.extend([str(row[col])] * int(weight * 15))
+                elif col == 'Matter Description':
+                    desc = str(row[col]).lower()
+                    legal_terms = ['litigation', 'counsel', 'advised', 'represented', 'negotiated']
+                    for term in legal_terms:
+                        if term in desc:
+                            text_parts.extend([term] * int(weight * 10))
+                else:
+                    text_parts.extend([str(row[col])] * int(weight * 10))
+        
+        text_parts.extend([str(row['expertise_combined'])] * 25)
+        return ' '.join(text_parts)
 
     combined_text = data.apply(weighted_text, axis=1)
 
-    vectorizer = TfidfVectorizer(stop_words='english', max_features=5000)
+    legal_stop_words = ['law', 'legal', 'lawyer', 'attorney', 'firm', 'practice', 'services']
+    vectorizer = TfidfVectorizer(
+        stop_words='english',
+        max_features=7500,
+        ngram_range=(1, 3),
+        min_df=2,
+        max_df=0.85
+    )
+    
     X = vectorizer.fit_transform(combined_text)
     X_normalized = normalize(X, norm='l2', axis=1, copy=False)
     
@@ -86,15 +121,16 @@ def create_weighted_vector_db(data):
     return index, vectorizer
 
 def call_claude(messages):
+    """Call Claude API with enhanced error handling."""
     try:
         system_message = messages[0]['content'] if messages[0]['role'] == 'system' else ""
         user_message = next(msg['content'] for msg in messages if msg['role'] == 'user')
         prompt = f"{system_message}\n\nHuman: {user_message}\n\nAssistant:"
 
         response = client.completions.create(
-            model="claude-2.1",
+            model="claude-3-sonnet-20240229",  # Updated to latest model
             prompt=prompt,
-            max_tokens_to_sample=500,
+            max_tokens_to_sample=1000,  # Increased for more detailed responses
             temperature=0.7
         )
         return response.completion
@@ -103,67 +139,107 @@ def call_claude(messages):
         return None
 
 def expand_query(query):
-    """
-    Expand the query with synonyms and related words.
-    """
-    expanded_query = []
+    """Expand query with legal domain focus and enhanced synonym handling."""
+    expanded_terms = []
+    legal_synonyms = {
+        'corporate': ['business', 'commercial', 'company'],
+        'litigation': ['dispute', 'lawsuit', 'trial', 'legal action'],
+        'intellectual property': ['ip', 'patent', 'trademark', 'copyright'],
+        'real estate': ['property', 'real property', 'land', 'lease'],
+        'employment': ['labor', 'workforce', 'personnel', 'workplace'],
+        'mergers': ['m&a', 'acquisitions', 'takeover'],
+        'finance': ['banking', 'financial', 'investment'],
+        'regulatory': ['compliance', 'regulation', 'oversight']
+    }
+
+    query_lower = query.lower()
+    for key, synonyms in legal_synonyms.items():
+        if key in query_lower:
+            expanded_terms.extend(synonyms)
+
     for word, tag in nltk.pos_tag(nltk.word_tokenize(query)):
-        synsets = wordnet.synsets(word)
-        if synsets:
-            synonyms = set()
-            for synset in synsets:
-                synonyms.update(lemma.name().replace('_', ' ') for lemma in synset.lemmas())
-            expanded_query.extend(list(synonyms)[:3])  # Limit to 3 synonyms per word
-        expanded_query.append(word)
-    return ' '.join(expanded_query)
+        if tag.startswith(('NN', 'VB', 'JJ')):
+            synsets = wordnet.synsets(word)
+            if synsets:
+                synonyms = set()
+                for synset in synsets[:2]:
+                    synonyms.update(lemma.name().replace('_', ' ') for lemma in synset.lemmas())
+                    for hypernym in synset.hypernyms():
+                        synonyms.update(lemma.name().replace('_', ' ') for lemma in hypernym.lemmas())
+                expanded_terms.extend(list(synonyms)[:3])
+        
+        expanded_terms.append(word)
+    
+    return ' '.join(expanded_terms)
 
 def normalize_query(query):
-    """
-    Normalize the query by removing punctuation and converting to lowercase.
-    """
-    query = re.sub(r'[^\w\s]', '', query)
-    return query.lower()
+    """Normalize query with enhanced cleaning."""
+    query = re.sub(r'[^\w\s]', ' ', query)
+    query = re.sub(r'\s+', ' ', query)
+    return query.lower().strip()
 
 def query_claude_with_data(question, matters_data, matters_index, matters_vectorizer):
-    # Normalize and expand the question
+    """Enhanced query function with improved matching and filtering."""
     normalized_question = normalize_query(question)
     expanded_question = expand_query(normalized_question)
     
     question_vec = matters_vectorizer.transform([expanded_question])
-    D, I = matters_index.search(normalize(question_vec).toarray(), k=5)  # Increased k to 30
+    D, I = matters_index.search(normalize(question_vec).toarray(), k=10)
 
     relevant_data = matters_data.iloc[I[0]]
 
-    # Calculate relevance scores
-    relevance_scores = 1 / (1 + D[0])
-    relevant_data['relevance_score'] = relevance_scores
+    # Enhanced relevance scoring
+    base_scores = 1 / (1 + D[0])
+    expertise_bonus = []
+    for _, row in relevant_data.iterrows():
+        bonus = 0
+        if any(term.lower() in row['Practice Group'].lower() for term in normalized_question.split()):
+            bonus += 0.3
+        if any(term.lower() in row['Area of Expertise'].lower() for term in normalized_question.split()):
+            bonus += 0.2
+        expertise_bonus.append(bonus)
+    
+    final_scores = base_scores + expertise_bonus
+    relevant_data['relevance_score'] = final_scores
 
-    # Sort by relevance score
+    # Enhanced filtering
+    relevance_threshold = 0.4
+    relevant_data = relevant_data[relevant_data['relevance_score'] >= relevance_threshold]
     relevant_data = relevant_data.sort_values('relevance_score', ascending=False)
 
-    # Get unique lawyers
-    unique_lawyers = relevant_data['Attorney'].unique()
+    lawyer_matter_counts = relevant_data.groupby('Attorney').size()
+    qualified_lawyers = lawyer_matter_counts[lawyer_matter_counts >= 2].index
+    relevant_data = relevant_data[relevant_data['Attorney'].isin(qualified_lawyers)]
 
-    # Ensure we have at least 3 unique lawyers (if available)
-    if len(unique_lawyers) < 3:
-        additional_lawyers = matters_data[~matters_data['Attorney'].isin(unique_lawyers)].sample(min(3 - len(unique_lawyers), len(matters_data) - len(unique_lawyers)))
-        relevant_data = pd.concat([relevant_data, additional_lawyers])
-
-    # Get top 3 unique lawyers
     top_lawyers = relevant_data['Attorney'].unique()[:3]
-
-    # Get all matters for top 3 lawyers, sorted by relevance
-    top_relevant_data = relevant_data[relevant_data['Attorney'].isin(top_lawyers)].sort_values('relevance_score', ascending=False)
+    top_relevant_data = relevant_data[relevant_data['Attorney'].isin(top_lawyers)]
 
     primary_info = top_relevant_data[['Attorney', 'Work Email', 'Role Detail', 'Practice Group', 'Summary', 'Area of Expertise']].drop_duplicates(subset=['Attorney'])
     secondary_info = top_relevant_data[['Attorney', 'Matter Description', 'relevance_score']]
 
-    primary_context = primary_info.to_string(index=False)
-    secondary_context = secondary_info.to_string(index=False)
+    primary_context = "LAWYER PROFILES:\n" + primary_info.to_string(index=False)
+    secondary_context = "\nRELEVANT MATTERS:\n" + secondary_info.to_string(index=False)
 
     messages = [
-        {"role": "system", "content": "You are an expert legal consultant tasked with recommending the best lawyers based on the given information. Analyze the primary information about the lawyers and consider the secondary information about their matters to refine your recommendation. Pay attention to the relevance scores provided."},
-        {"role": "user", "content": f"Question: {question}\n\nTop Lawyers Information:\n{primary_context}\n\nRelated Matters (including relevance scores):\n{secondary_context}\n\nBased on all this information, provide your final recommendation for the most suitable lawyer(s) and explain your reasoning in detail. Consider the relevance scores when making your recommendation. Recommend up to 3 lawyers, discussing their relevant experience and matters they've worked on. If fewer than 3 lawyers are relevant, only recommend those who are truly suitable."}
+        {"role": "system", "content": """You are an expert legal consultant with deep knowledge of law firm operations. 
+Your task is to recommend the most suitable lawyers based on the provided information and explain why they are the best fit.
+Consider these key factors in your analysis:
+1. Direct expertise match with the query
+2. Depth of experience in relevant areas
+3. Complexity and scope of handled matters
+4. Overall relevance scores
+
+Provide recommendations only if the lawyer's expertise clearly matches the query requirements."""},
+        {"role": "user", "content": f"""Query: {question}
+
+{primary_context}
+
+{secondary_context}
+
+Based on this information, recommend the most suitable lawyer(s) for this query. 
+Focus on specific experiences and matters that directly relate to the query.
+Only recommend lawyers whose expertise strongly matches the requirements.
+If none of the lawyers are a good fit, please state that clearly."""}
     ]
 
     claude_response = call_claude(messages)
@@ -180,48 +256,73 @@ def query_claude_with_data(question, matters_data, matters_index, matters_vector
     st.write(secondary_info.to_html(index=False), unsafe_allow_html=True)
 
 # Streamlit app layout
-st.title("Rolodex AI: Find Your Legal Match 👨‍⚖️ Utilizing Claude 3.5")
-st.write("Ask questions about the skill-matched lawyers for your specific legal needs:")
+def main():
+    st.title("Rolodex AI: Find Your Legal Match 👨‍⚖️")
+    st.write("Ask questions about the skill-matched lawyers for your specific legal needs:")
 
-default_questions = {
-    "Which attorneys have the most experience with intellectual property?": "intellectual property",
-    "Can you recommend a lawyer specializing in employment law?": "employment law",
-    "Who are the best litigators for financial cases?": "financial law",
-    "Which lawyer should I contact for real estate matters?": "real estate"
-}
+    default_questions = {
+        "Which attorneys have the most experience with intellectual property?": "intellectual property",
+        "Can you recommend a lawyer specializing in employment law?": "employment law",
+        "Who are the best litigators for financial cases?": "financial law",
+        "Which lawyer should I contact for real estate matters?": "real estate",
+        "Who has experience with mergers and acquisitions?": "m&a",
+        "Which lawyers specialize in regulatory compliance?": "compliance"
+    }
 
-user_input = st.text_input("Type your question:", placeholder="e.g., 'Who are the top lawyers for corporate law?'")
+    user_input = st.text_input("Type your question:", 
+                              placeholder="e.g., 'Who are the top lawyers for corporate law?'")
 
-for question, _ in default_questions.items():
-    if st.button(question):
-        user_input = question
-        break
+    # Add example questions as buttons
+    st.write("### Example Questions:")
+    cols = st.columns(2)
+    for i, (question, _) in enumerate(default_questions.items()):
+        if i % 2 == 0:
+            if cols[0].button(question):
+                user_input = question
+        else:
+            if cols[1].button(question):
+                user_input = question
 
-if user_input:
-    progress_bar = st.progress(0)
-    progress_bar.progress(10)
-    matters_data = load_and_clean_data('Cleaned_Matters_Data.csv')
-    if not matters_data.empty:
-        progress_bar.progress(50)
-        matters_index, matters_vectorizer = create_weighted_vector_db(matters_data)
-        progress_bar.progress(90)
-        query_claude_with_data(user_input, matters_data, matters_index, matters_vectorizer)
-        progress_bar.progress(100)
-    else:
-        st.error("Failed to load data.")
-    progress_bar.empty()
+    if user_input:
+        with st.spinner('Analyzing your query...'):
+            progress_bar = st.progress(0)
+            progress_bar.progress(10)
+            
+            matters_data = load_and_clean_data('Cleaned_Matters_Data.csv')
+            if not matters_data.empty:
+                progress_bar.progress(50)
+                matters_index, matters_vectorizer = create_weighted_vector_db(matters_data)
+                progress_bar.progress(90)
+                query_claude_with_data(user_input, matters_data, matters_index, matters_vectorizer)
+                progress_bar.progress(100)
+            else:
+                st.error("Failed to load data.")
+            progress_bar.empty()
 
-# Feedback section
-st.write("### How accurate was this result?")
-accuracy_choice = st.radio("Please select one:", ["Accurate", "Not Accurate", "Type your own feedback"])
+    # Enhanced feedback section
+    st.write("### How accurate was this result?")
+    feedback_col1, feedback_col2 = st.columns(2)
+    with feedback_col1:
+        accuracy_rating = st.slider("Rate the accuracy (1-5):", 1, 5, 3)
+    
+    with feedback_col2:
+        feedback_type = st.multiselect("What aspects need improvement?",
+                                     ["Relevance", "Expertise Match", "Matter Description", "Response Quality"])
 
-if accuracy_choice == "Type your own feedback":
-    custom_feedback = st.text_input("Please provide your feedback:")
-else:
-    custom_feedback = accuracy_choice
+    feedback_text = st.text_area("Additional feedback (optional):", 
+                                placeholder="Please share any specific feedback about the recommendations...")
 
-if st.button("Submit Feedback"):
-    if custom_feedback:
-        st.write(f"Thank you for your feedback: '{custom_feedback}'")
-    else:
-        st.error("Please provide feedback before submitting.")
+    if st.button("Submit Feedback"):
+        if accuracy_rating or feedback_type or feedback_text:
+            feedback_data = {
+                "accuracy_rating": accuracy_rating,
+                "improvement_areas": feedback_type,
+                "feedback_text": feedback_text
+            }
+            st.success("Thank you for your feedback! This will help us improve the system.")
+            # Here you could add code to store the feedback in a database
+        else:
+            st.warning("Please provide at least one type of feedback before submitting.")
+
+if __name__ == "__main__":
+    main()
