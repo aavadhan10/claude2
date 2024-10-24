@@ -35,31 +35,21 @@ def load_and_clean_data(file_path, encoding='utf-8'):
 
     def clean_text(text):
         if isinstance(text, str):
-            # Remove non-printable characters
             text = ''.join(char for char in text if char.isprintable())
-            # Normalize unicode characters
             text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('ascii')
-            # Replace specific problematic sequences
             text = text.replace('Ã¢ÂÂ', "'").replace('Ã¢ÂÂ¨', ", ")
-            # Remove any remaining unicode escape sequences
             text = re.sub(r'\\u[0-9a-fA-F]{4}', '', text)
-            # Replace multiple spaces with a single space
             text = re.sub(r'\s+', ' ', text).strip()
-            # Convert to lowercase for consistency
             text = text.lower()
         return text
 
-    # Clean column names
     data.columns = data.columns.str.replace('ï»¿', '').str.replace('Ã', '').str.strip()
-
-    # Clean text in all columns
+    
     for col in data.columns:
         data[col] = data[col].apply(clean_text)
 
-    # Remove unnamed columns
     data = data.loc[:, ~data.columns.str.contains('^Unnamed')]
-
-    # Remove rows with missing critical information
+    
     critical_columns = ['Attorney', 'Practice Group', 'Area of Expertise']
     data = data.dropna(subset=critical_columns)
 
@@ -68,7 +58,6 @@ def load_and_clean_data(file_path, encoding='utf-8'):
 @st.cache_resource
 def create_weighted_vector_db(data):
     """Simplified vector database creation without weights."""
-    # Combine all relevant fields
     combined_text = data.apply(
         lambda row: ' '.join([
             str(row['Attorney']),
@@ -114,7 +103,7 @@ def call_claude(messages):
         return None
 
 def expand_query(query):
-    """Expand query with legal domain focus and enhanced synonym handling."""
+    """Expand query with legal domain focus."""
     expanded_terms = []
     legal_synonyms = {
         'corporate': ['business', 'commercial', 'company'],
@@ -158,9 +147,9 @@ def query_claude_with_data(question, matters_data, matters_index, matters_vector
     normalized_question = normalize_query(question)
     expanded_question = expand_query(normalized_question)
     
-    # Get large initial pool
+    # Get large initial pool - INCREASED for more results
     question_vec = matters_vectorizer.transform([expanded_question])
-    D, I = matters_index.search(normalize(question_vec).toarray(), k=200)
+    D, I = matters_index.search(normalize(question_vec).toarray(), k=300)  # Increased from 200 to 300
 
     # Get all relevant matters
     relevant_indices = I[0]
@@ -193,8 +182,8 @@ def query_claude_with_data(question, matters_data, matters_index, matters_vector
     # Group by attorney and get their best score
     attorney_scores = relevant_data.groupby('Attorney')['relevance_score'].max()
     
-    # Get all attorneys with any matches
-    qualified_attorneys = attorney_scores[attorney_scores > 0].index
+    # Get all attorneys with any matches - REMOVED minimum score requirement
+    qualified_attorneys = attorney_scores.index
     
     # Get all data for qualified attorneys
     all_attorney_data = matters_data[matters_data['Attorney'].isin(qualified_attorneys)]
@@ -205,15 +194,16 @@ def query_claude_with_data(question, matters_data, matters_index, matters_vector
     # Sort by score
     all_attorney_data = all_attorney_data.sort_values('relevance_score', ascending=False)
     
-    # Get top 15 attorneys
-    top_attorneys = all_attorney_data['Attorney'].unique()[:15]
+    # Get top attorneys - INCREASED for more results
+    top_attorneys = all_attorney_data['Attorney'].unique()[:20]  # Increased from 15 to 20
     top_attorney_data = all_attorney_data[all_attorney_data['Attorney'].isin(top_attorneys)]
 
-    # Get unique attorney info
+    # FIXED: Get unique attorney info without sorting by relevance_score
     primary_info = (top_attorney_data[['Attorney', 'Work Email', 'Role Detail', 
                                      'Practice Group', 'Summary', 'Area of Expertise']]
-                   .sort_values(['relevance_score'], ascending=[False])
-                   .drop_duplicates(subset=['Attorney']))
+                   .groupby('Attorney')
+                   .first()
+                   .reset_index())
     
     # Get their matters
     secondary_info = (top_attorney_data[['Attorney', 'Matter Description', 'relevance_score']]
@@ -226,7 +216,7 @@ def query_claude_with_data(question, matters_data, matters_index, matters_vector
     messages = [
         {"role": "system", "content": """You are an expert legal consultant tasked with providing comprehensive lawyer recommendations.
 Key requirements:
-1. Present ALL relevant lawyers (up to 15) who might be valuable for the query
+1. Present ALL relevant lawyers (up to 20) who might be valuable for the query
 2. Include lawyers with both direct and related expertise
 3. Explain each lawyer's potential value
 4. Consider both primary expertise and related experience
